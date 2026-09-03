@@ -330,6 +330,7 @@
       <button class="ghost danger" id="cfgClear">Clear all my status flags</button>
     </div>
     <p class="note">Status flags and hidden jobs are stored on this board for you only. Shift content always comes live from the sheet.</p>
+    <p class="note" id="buildNote" style="opacity:.7"></p>
   </div>
 </div>
 
@@ -374,6 +375,7 @@
 
   var STAT = { pending:"pending", actioned:"actioned", urgent:"urgent" };
   var el = function(id){ return document.getElementById(id); };
+  var BUILD = "2026-09-03 · errors+demo";
 
   /* ---------- header normalisation ---------- */
   var MAP = {
@@ -903,6 +905,7 @@
     var n=hiddenCount();
     el("cfgRestore").textContent = n ? ("Restore hidden jobs ("+n+")") : "Restore hidden jobs";
     el("cfgRestore").disabled = !n;
+    el("buildNote").textContent = "Build "+BUILD;
     el("modal").classList.add("show");
   }
   function closeModal(){ el("modal").classList.remove("show"); }
