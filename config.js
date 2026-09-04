@@ -11,7 +11,7 @@
 window.PIB_CONFIG = {
 
   // Your Apps Script web-app URL (ends in /exec). This is the live API.
-  apiUrl: "",
+  apiUrl: "https://script.google.com/macros/s/AKfycbzeLun6kVzO4K8N3cQpVRN0GvujvhH0IWN_RkmoaPsXQjl7x-NumxSLzi4oAnwOSbgi/exec",
 
   // Optional — only used if apiUrl is blank (older CSV mode):
   url:     "",   // published jobs CSV link
