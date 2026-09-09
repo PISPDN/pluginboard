@@ -1,0 +1,2694 @@
+<!DOCTYPE html>
+<!-- Live Field Board — reads a published Google Sheet CSV (fed by your Connecteam Zaps),
+     groups shifts into per-engineer columns, and lets you flag each job
+     Pending / Actioned / Urgent. Status flags persist in the board's own storage. -->
+<meta charset="utf-8" />
+<title>Plug In Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --surface:#EDF1F6;      /* cool control-panel base, not cream            */
+    --panel:#FFFFFF;
+    --ink:#16233A;          /* deep slate — real navy, not tinted black       */
+    --muted:#5B6B82;
+    --faint:#8A99AD;
+    --line:#DBE3ED;
+    --live:#0B7DD4;         /* electric blue = live / current / interactive   */
+    --live-soft:#E4F1FB;
+    --pending:#E8912B;
+    --pending-soft:#FDF3E6;
+    --actioned:#1F9D57;
+    --actioned-soft:#E9F6EE;
+    --urgent:#D8382F;
+    --urgent-soft:#FBEAE9;
+    --radius:10px;
+    --font:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    --shadow:rgba(22,35,58,.08);
+    --backdrop:rgba(22,35,58,.35);
+  }
+  body.dark{
+    --surface:#191B1E;      /* neutral dark grey, not blue */
+    --panel:#212429;        /* elevated grey */
+    --ink:#E7E9EC;
+    --muted:#9BA0A6;
+    --faint:#697077;
+    --line:#2C3036;
+    --live:#8ED155;         /* lime highlight */
+    --live-soft:#232B18;
+    --pending:#E8A54B;
+    --pending-soft:#2A2213;
+    --actioned:#8ED155;
+    --actioned-soft:#212B16;
+    --urgent:#EF5A50;
+    --urgent-soft:#2E1815;
+    --shadow:rgba(0,0,0,.45);
+    --backdrop:rgba(0,0,0,.6);
+  }
+  /* dark-mode contrast: dark text on the light accent/status fills */
+  body.dark .primary{color:#16181B}
+  body.dark .seg button[data-s="actioned"].on{color:#16181B}
+  body.dark .seg button[data-s="pending"].on{color:#16181B}
+  body.dark .avatar.done{color:#16181B}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:var(--font);
+    color:var(--ink);
+    background:var(--surface);
+    -webkit-font-smoothing:antialiased;
+    display:flex;flex-direction:column;height:100vh;overflow:hidden;
+    transition:background .15s,color .15s;
+  }
+  button{font-family:inherit;cursor:pointer}
+  input{font-family:inherit;background:var(--panel);color:var(--ink)}
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    display:flex;align-items:center;gap:18px;
+    padding:14px 20px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  .brand{display:flex;flex-direction:column;line-height:1.15}
+  .brand b{font-size:17px;font-weight:700;letter-spacing:-.2px}
+  .brand span{font-size:11.5px;color:var(--faint)}
+  .live{
+    display:flex;align-items:center;gap:8px;margin-left:6px;
+    padding:5px 11px;border-radius:999px;background:var(--live-soft);
+    color:var(--live);font-size:12px;font-weight:600;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--live);position:relative}
+  .dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;
+    background:var(--live);opacity:.35;animation:pulse 1.8s ease-out infinite}
+  @keyframes pulse{0%{transform:scale(.6);opacity:.5}100%{transform:scale(2.4);opacity:0}}
+  @media (prefers-reduced-motion:reduce){.dot::after{animation:none;opacity:0}}
+  .stale .dot,.stale.live{background:var(--pending-soft);color:var(--pending)}
+  .stale .dot{background:var(--pending)}
+  .stale .dot::after{background:var(--pending)}
+
+  .spacer{flex:1}
+  .updated{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .tbtn{
+    border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    padding:7px 13px;border-radius:8px;font-size:13px;font-weight:600;
+  }
+  .tbtn:hover{border-color:var(--live);color:var(--live)}
+
+  /* ---------- summary strip ---------- */
+  .summary{
+    display:flex;gap:10px;padding:12px 20px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;overflow-x:auto;
+  }
+  .stat{
+    display:flex;flex-direction:column;gap:2px;padding:8px 16px 8px 14px;
+    border-left:3px solid var(--line);min-width:96px;
+  }
+  .stat b{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
+  .stat span{font-size:11px;color:var(--muted);font-weight:600}
+  .stat.p{border-color:var(--pending)} .stat.p b{color:var(--pending)}
+  .stat.a{border-color:var(--actioned)} .stat.a b{color:var(--actioned)}
+  .stat.u{border-color:var(--urgent)} .stat.u b{color:var(--urgent)}
+  .stat.u.hot{background:var(--urgent-soft);border-radius:6px}
+  .clearbtn{margin-left:auto;align-self:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);
+    font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:8px;white-space:nowrap}
+  .clearbtn:hover{border-color:var(--urgent);color:var(--urgent)}
+
+  /* ---------- tabs ---------- */
+  .tabs{
+    display:flex;gap:4px;padding:0 20px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  .tab{
+    border:none;background:none;color:var(--muted);font-size:13.5px;font-weight:650;
+    padding:12px 6px;margin-right:14px;border-bottom:2px solid transparent;
+    display:inline-flex;align-items:center;gap:7px;
+  }
+  .tab:hover{color:var(--ink)}
+  .tab.on{color:var(--ink);border-bottom-color:var(--live)}
+  .tabbadge{
+    display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;
+    border-radius:999px;background:var(--urgent);color:#fff;font-size:11px;font-weight:700;
+  }
+
+  /* ---------- errors view ---------- */
+  .errview{flex:1;overflow-y:auto;padding:16px 20px 24px}
+  .errgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-content:start}
+  .errempty{max-width:520px;margin:32px auto;color:var(--muted);font-size:14px;line-height:1.6;
+    border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center}
+  .card.errcard .title{display:flex;align-items:flex-start;gap:6px}
+  .errdot{color:var(--urgent);flex:0 0 auto;margin-top:1px}
+  .stockview{flex:1;overflow-y:auto;padding:16px 20px 24px}
+  .stocktally{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--live);border-radius:10px;
+    padding:11px 15px;margin-bottom:14px;font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .stocktally .tcount{color:var(--muted);font-weight:600}
+  .stocktally .tcount b{color:var(--ink);font-size:16px;margin-left:4px;font-variant-numeric:tabular-nums}
+  .typechip{display:inline-block;font-size:11px;font-weight:700;background:var(--urgent-soft);color:var(--urgent);padding:2px 9px;border-radius:999px;margin-bottom:7px;text-transform:uppercase}
+  .flowview{flex:1;overflow-y:auto;padding:16px 20px 24px;display:flex;flex-direction:column;gap:12px}
+  .tasksview{flex:1;display:flex;flex-direction:column;overflow:hidden}
+  .taskadd{display:flex;gap:8px;padding:14px 20px 10px;flex-wrap:wrap;align-items:center}
+  .taskadd input{border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:13.5px;background:var(--panel);color:var(--ink)}
+  .taskadd #tkTitle{flex:1;min-width:220px}
+  .taskadd #tkFor{width:170px}
+  .taskboard{flex:1;display:flex;gap:14px;padding:6px 20px 22px;overflow-x:auto;overflow-y:hidden;align-items:flex-start}
+  .taskcol{flex:0 0 260px;max-width:260px;display:flex;flex-direction:column;max-height:100%}
+  .card.taskcard{cursor:default}
+  .card.taskcard.st-working{border-left-color:var(--pending)}
+  .card.taskcard.st-blocked{border-left-color:var(--urgent);background:var(--urgent-soft)}
+  .card.taskcard.st-done{border-left-color:var(--actioned);opacity:.75}
+  .card.taskcard.st-done .title{text-decoration:line-through;text-decoration-color:var(--faint)}
+  .card.taskcard.st-todo{border-left-color:var(--line)}
+  .tksel{width:100%;margin-top:2px;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px;background:var(--surface);color:var(--ink)}
+  .taskweek{display:flex;align-items:center;gap:10px;padding:2px 20px 10px}
+  .taskweek .calmonth{font-size:15px;font-weight:700;min-width:180px}
+  .taskadd #tkDue{width:150px}
+  .taskcol.today .colname{color:var(--live)}
+  .tkrow{display:flex;gap:6px;margin-top:4px}
+  .tkrow .tksel{margin-top:0;flex:1}
+  .tkdue{width:120px;border:1px solid var(--line);border-radius:7px;padding:5px 7px;font-size:12px;background:var(--surface);color:var(--ink)}
+  .tstseg{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+  .tstseg.dstatus{margin:2px 0 14px}
+  .tstbtn{flex:1;min-width:60px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:11px;font-weight:600;padding:5px 4px;border-radius:7px;cursor:pointer}
+  .tstbtn.on.todo{background:var(--surface);border-color:var(--faint);color:var(--ink)}
+  .tstbtn.on.working{background:var(--pending);border-color:var(--pending);color:#fff}
+  .tstbtn.on.blocked{background:var(--urgent);border-color:var(--urgent);color:#fff}
+  .tstbtn.on.done{background:var(--actioned);border-color:var(--actioned);color:#fff}
+  body.dark .tstbtn.on.working,body.dark .tstbtn.on.done{color:#16181B}
+  .upflag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:var(--live);background:var(--live-soft);padding:2px 8px;border-radius:999px;margin-top:6px}
+  .tkform{display:flex;flex-direction:column}
+  .tkform label{font-size:12px;font-weight:600;color:var(--muted);margin:10px 0 5px}
+  .tkform input,.tkform textarea{border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:13.5px;background:var(--panel);color:var(--ink);font-family:inherit}
+  .tkform input:focus,.tkform textarea:focus{outline:none;border-color:var(--live)}
+  .tkdetails{font-size:13.5px;line-height:1.5;color:var(--ink);white-space:pre-wrap;margin-bottom:6px}
+  .uplist{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+  .upitem{border-left:3px solid var(--live);background:var(--surface);border-radius:6px;padding:7px 10px;font-size:13px;line-height:1.45}
+  .upmeta{font-size:11px;color:var(--faint);font-weight:600;margin-bottom:2px}
+  .priochip{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:2px 8px;border-radius:999px;margin-bottom:6px}
+  .priochip.pr-high{background:var(--urgent);color:#fff}
+  .priochip.pr-medium{background:var(--pending-soft);color:var(--pending)}
+  .priochip.pr-low{background:var(--surface);color:var(--faint);border:1px solid var(--line)}
+  .card.taskcard.pr-high{box-shadow:inset 3px 0 0 var(--urgent)}
+  .subflag{display:inline-flex;align-items:flex-start;gap:5px;font-size:11px;font-weight:600;color:var(--live);background:var(--live-soft);padding:3px 8px;border-radius:6px;margin:2px 0 4px;line-height:1.3}
+  .priobtn{border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;cursor:pointer}
+  .priobtn.pr-high.on{background:var(--urgent);border-color:var(--urgent);color:#fff}
+  .priobtn.pr-medium.on{background:var(--pending);border-color:var(--pending);color:#fff}
+  .priobtn.pr-low.on{background:var(--faint);border-color:var(--faint);color:#fff}
+  body.dark .priobtn.pr-medium.on{color:#16181B}
+  .youare{font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+  .youare select{border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px;background:var(--panel);color:var(--ink)}
+  .flowempty{max-width:560px;margin:32px auto;color:var(--muted);font-size:14px;line-height:1.6;border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center}
+  .card.flowcard{max-width:none}
+  .flowcard .carddel{opacity:.85;top:9px;right:10px;background:var(--surface)}
+  .flowcard .fhead{padding-right:30px}
+  .fhead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .feng{font-weight:700;font-size:14px}
+  .fwhen{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .fpill{margin-left:auto;font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px}
+  .fpill.ok{background:var(--actioned-soft);color:var(--actioned)}
+  .fpill.check{background:var(--pending-soft);color:var(--pending)}
+  .fpill.fail{background:var(--urgent);color:#fff}
+  .card.flowcard.auto-fail{border-left-color:var(--urgent)}
+  .card.flowcard.auto-check{border-left-color:var(--pending)}
+  .card.flowcard.auto-ok{border-left-color:var(--actioned)}
+  .fgrid{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:stretch}
+  .fstage{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0}
+  .fstage-h{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);margin-bottom:6px}
+  .frow{display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+  .frow .fl{color:var(--muted)}
+  .frow .fv{font-weight:600;text-align:right}
+  .frow .fv.err{color:var(--urgent);font-weight:600}
+  .fdot{font-weight:700}
+  .fdot.ok{color:var(--actioned)} .fdot.bad{color:var(--urgent)} .fdot.unk{color:var(--faint)}
+  .farrow{display:flex;align-items:center;color:var(--faint);font-size:16px}
+  @media (max-width:760px){ .fgrid{grid-template-columns:1fr} .farrow{transform:rotate(90deg);justify-content:center;padding:2px 0} }
+  .stockview .stockgrid,.stockgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-content:start}
+  .stockempty{max-width:520px;margin:32px auto;color:var(--muted);font-size:14px;line-height:1.6;border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center}
+  .card.stockcard .title{display:flex;align-items:flex-start;gap:6px}
+  .stockdot{color:var(--live);flex:0 0 auto;margin-top:1px}
+  .card.stockcard.nf{border-left-color:var(--urgent);background:var(--urgent-soft)}
+  .nfchip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#fff;background:var(--urgent);padding:2px 9px;border-radius:999px;margin-bottom:7px}
+
+  /* ---------- calendar ---------- */
+  .calview{flex:1;overflow-y:auto;padding:16px 20px 24px;display:flex;flex-direction:column}
+  .calbar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .calmonth{font-size:17px;font-weight:700;letter-spacing:-.2px;min-width:170px}
+  .calnav{border:1px solid var(--line);background:var(--panel);color:var(--ink);width:32px;height:32px;border-radius:8px;font-size:15px}
+  .calnav:hover{border-color:var(--live);color:var(--live)}
+  .caltoday{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:0 12px;height:32px;border-radius:8px;font-size:13px;font-weight:600}
+  .caltoday:hover{border-color:var(--live);color:var(--live)}
+  .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:520px}
+  .caldow{background:var(--panel);padding:8px 10px;font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+  .calcell{background:var(--panel);padding:6px 7px;min-height:96px;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+  .calcell.dim{opacity:.4}
+  .calcell.today{background:var(--live-soft)}
+  .caldate{font-size:12px;font-weight:700;color:var(--muted)}
+  .calcell.today .caldate{color:var(--live)}
+  .calchip{font-size:11px;line-height:1.25;padding:3px 6px;border-radius:5px;border-left:3px solid var(--pending);
+    background:var(--surface);color:var(--ink);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .calchip:hover{filter:brightness(1.08)}
+  .calchip.s-actioned{border-left-color:var(--actioned);opacity:.6}
+  .calchip.s-urgent{border-left-color:var(--urgent)}
+  .calchip.s-pending{border-left-color:var(--pending)}
+  .calmore{font-size:10.5px;color:var(--faint);font-weight:600}
+
+  /* ---------- notifications ---------- */
+  .tabspacer{flex:1}
+  .tabbadge[hidden],.bellbadge[hidden]{display:none!important}
+  .bell{position:relative}
+  .bell svg{display:block}
+  .bellbadge{position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;
+    background:var(--urgent);color:#fff;font-size:10.5px;font-weight:700;display:grid;place-items:center}
+  .notifpanel{position:fixed;top:60px;right:16px;z-index:120;width:360px;max-width:calc(100vw - 32px);
+    max-height:70vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;box-shadow:0 10px 34px var(--shadow);overflow:hidden}
+  .notifpanel[hidden]{display:none}
+  .notifhead{padding:12px 14px;font-size:13px;font-weight:700;border-bottom:1px solid var(--line)}
+  .notifbody{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+  .card .daychip{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;margin-bottom:6px;
+    background:var(--pending-soft);color:var(--pending)}
+  .card .daychip.today{background:var(--urgent-soft);color:var(--urgent)}
+  .card .daychip.overdue{background:var(--urgent);color:#fff}
+  .notifempty{color:var(--muted);font-size:13px;line-height:1.6;padding:18px 6px;text-align:center}
+
+  /* ---------- board ---------- */
+  .board{
+    flex:1;display:flex;gap:14px;padding:16px 20px 22px;
+    overflow-x:auto;overflow-y:hidden;align-items:flex-start;
+  }
+  .col{
+    flex:0 0 288px;max-width:288px;background:transparent;
+    display:flex;flex-direction:column;max-height:100%;
+  }
+
+  /* ---------- orders / invoices ---------- */
+  .ordersview{flex:1;overflow-y:auto;padding:16px 20px 24px;display:flex;flex-direction:column;gap:14px}
+  .subtabs{display:flex;gap:6px}
+  .subtab{border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13px;font-weight:600;padding:7px 13px;border-radius:8px}
+  .subtab.on{border-color:var(--live);color:var(--live)}
+  .opanel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;max-width:840px}
+  .orow{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+  .ofield{display:flex;flex-direction:column;gap:5px}
+  .ofield label{font-size:12px;font-weight:600;color:var(--muted)}
+  .ofield input,.ofield select{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13.5px;background:var(--panel);color:var(--ink)}
+  .ofield input:focus,.ofield select:focus{outline:none;border-color:var(--live)}
+  .otable{width:100%;border-collapse:collapse;font-size:13px}
+  .otable th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .otable td{padding:5px 8px;border-bottom:1px solid var(--line)}
+  .otable td.num,.otable th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .otable input{width:74px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:13px;text-align:right;background:var(--panel);color:var(--ink)}
+  .otable input.name{width:100%;text-align:left}
+  .oitemname{font-weight:500}
+  .ospecial td{border-bottom:1px dashed var(--line)}
+  .ototals{display:flex;flex-direction:column;gap:4px;align-items:flex-end;margin-top:14px;font-variant-numeric:tabular-nums}
+  .ototals .row{display:flex;gap:24px;font-size:13.5px;min-width:220px;justify-content:space-between}
+  .ototals .grand{font-size:16px;font-weight:700}
+  .obtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .addrow{border:1px dashed var(--line);background:none;color:var(--muted);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:8px;margin-top:8px}
+  .addrow:hover{border-color:var(--live);color:var(--live)}
+  .omsg{font-size:13px;margin-top:10px;min-height:16px}
+  .omsg.bad{color:var(--urgent)}
+  .omsg.ok{color:var(--actioned)}
+  .delrow{border:none;background:none;color:var(--faint);cursor:pointer;font-size:15px}
+  .delrow:hover{color:var(--urgent)}
+
+  .invlist{display:flex;flex-direction:column;gap:8px}
+  .invrow{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer}
+  .invrow:hover{box-shadow:0 3px 12px var(--shadow)}
+  .invrow.st-audited{border-left-color:var(--actioned)}
+  .invrow.st-received{border-left-color:var(--live)}
+  .invrow.st-flagged{border-left-color:var(--urgent);background:var(--urgent-soft)}
+  .invnum{font-weight:700;font-variant-numeric:tabular-nums;min-width:120px}
+  .invwhole{font-size:12px;color:var(--muted);min-width:70px}
+  .invmeta{font-size:12px;color:var(--muted);flex:1;font-variant-numeric:tabular-nums}
+  .invpill{font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;background:var(--surface);color:var(--muted)}
+  .invpill.audited{background:var(--actioned-soft);color:var(--actioned)}
+  .invpill.flagged{background:var(--urgent);color:#fff}
+  .gapbar{background:var(--urgent-soft);color:var(--urgent);border:1px solid var(--urgent);border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:10px}
+  .wholehead{font-size:13px;font-weight:700;margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+  .oempty{color:var(--muted);font-size:14px;line-height:1.6;border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center;max-width:520px}
+  .uploadbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  .uploadbar .umsg{font-size:12.5px;color:var(--muted)}
+  .unmatched{background:var(--pending-soft);border:1px solid var(--pending);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  .unmatched .uhead{font-size:12.5px;font-weight:700;color:var(--pending);margin-bottom:8px}
+  .urow{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+  .urow .uname{font-size:12.5px;flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .urow select{border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:12.5px;background:var(--panel);color:var(--ink)}
+  .urow .ulink{font-size:12px;color:var(--live);cursor:pointer;text-decoration:underline}
+  .clip{color:var(--live);font-weight:700;margin-left:2px}
+
+  #printarea{display:none}
+  @media print {
+    body > *{ display:none !important; }
+    #printarea{ display:block !important; position:static; color:#000; background:#fff; padding:0; }
+    .inv-doc{max-width:720px;margin:0 auto;font-family:Arial,sans-serif;color:#000}
+    .inv-doc h1{font-size:22px;margin:0 0 2px}
+    .inv-doc .muted{color:#555;font-size:13px}
+    .inv-doc table{width:100%;border-collapse:collapse;margin-top:18px;font-size:13px}
+    .inv-doc th{text-align:left;border-bottom:2px solid #000;padding:6px 8px}
+    .inv-doc td{padding:6px 8px;border-bottom:1px solid #ccc}
+    .inv-doc td.num,.inv-doc th.num{text-align:right}
+    .inv-doc .tot{margin-top:16px;text-align:right;font-size:14px}
+    .inv-doc .tot .g{font-size:17px;font-weight:700}
+  }
+
+  .colhead{
+    display:flex;align-items:center;gap:8px;padding:0 4px 10px;
+  }
+  .avatar{
+    width:28px;height:28px;border-radius:7px;flex:0 0 auto;
+    display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;
+  }
+  .colname{font-size:14px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .colcount{font-size:12px;color:var(--faint);font-weight:600;font-variant-numeric:tabular-nums}
+  .colflag{width:7px;height:7px;border-radius:50%;background:var(--urgent);box-shadow:0 0 0 3px var(--urgent-soft)}
+  .cards{
+    display:flex;flex-direction:column;gap:9px;overflow-y:auto;padding:2px 4px 8px;
+  }
+
+  /* ---------- card ---------- */
+  .card{
+    position:relative;cursor:pointer;
+    background:var(--panel);border:1px solid var(--line);
+    border-left:4px solid var(--line);border-radius:var(--radius);
+    padding:11px 12px;transition:border-color .12s,box-shadow .12s;
+  }
+  .card:hover{box-shadow:0 3px 12px var(--shadow)}
+  .card:hover .title{color:var(--live)}
+  .card.s-pending{border-left-color:var(--pending)}
+  .card.s-actioned{border-left-color:var(--actioned);opacity:.82}
+  .card.s-urgent{border-left-color:var(--urgent);background:var(--urgent-soft)}
+  .carddel{
+    position:absolute;top:6px;right:6px;width:22px;height:22px;z-index:2;
+    border:none;background:transparent;color:var(--faint);font-size:16px;line-height:1;
+    border-radius:6px;display:grid;place-items:center;opacity:.35;transition:opacity .1s,background .1s,color .1s;
+  }
+  .card:hover .carddel{opacity:1}
+  .carddel:hover{background:var(--urgent-soft);color:var(--urgent)}
+  .card-body{border-radius:6px;margin:-2px -2px 0;padding:2px;min-width:0}
+  .card .title{font-size:14px;font-weight:650;line-height:1.3;margin:0 22px 5px 0;overflow-wrap:anywhere}
+  .card.s-actioned .title{text-decoration:line-through;text-decoration-color:var(--faint)}
+  .meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted);margin-bottom:9px;min-width:0}
+  .meta .m{display:inline-flex;align-items:flex-start;gap:4px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;min-width:0}
+  .meta svg{opacity:.6;flex:0 0 auto;margin-top:2px}
+  .cardnote{
+    font-size:12px;color:var(--muted);line-height:1.4;margin-bottom:9px;overflow-wrap:anywhere;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .cardimg{display:block;max-width:100%;max-height:240px;object-fit:cover;border:1px solid var(--line);border-radius:8px;margin-top:2px}
+
+  .seg{display:flex;gap:5px}
+  .seg button{
+    flex:1;border:1px solid var(--line);background:var(--panel);
+    color:var(--muted);font-size:11.5px;font-weight:600;
+    padding:5px 4px;border-radius:7px;transition:all .1s;
+  }
+  .seg button:hover{border-color:currentColor}
+  .seg button[data-s="pending"].on{background:var(--pending);border-color:var(--pending);color:#fff}
+  .seg button[data-s="actioned"].on{background:var(--actioned);border-color:var(--actioned);color:#fff}
+  .seg button[data-s="urgent"].on{background:var(--urgent);border-color:var(--urgent);color:#fff}
+
+  .blocker{
+    margin-top:9px;display:none;
+  }
+  .card.s-urgent .blocker{display:block}
+  .blocker input{
+    width:100%;border:1px solid var(--urgent);background:var(--surface);color:var(--ink);
+    border-radius:7px;padding:6px 9px;font-size:12.5px;
+  }
+  .blocker input::placeholder{color:var(--faint)}
+
+  .cardeng{font-size:11px;font-weight:700;color:var(--faint);margin-bottom:3px;letter-spacing:.01em}
+  .col-done .colname{color:var(--actioned)}
+  .avatar.done{background:var(--actioned);color:#fff}
+  .col-done .cards{opacity:.95}
+  .colempty{font-size:12px;color:var(--faint);padding:14px 8px;text-align:center;
+    border:1px dashed var(--line);border-radius:8px}
+
+  /* ---------- overlays: empty + settings + error ---------- */
+  .center{flex:1;display:grid;place-items:center;padding:24px}
+  .pane{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:28px;max-width:520px;width:100%;
+  }
+  .pane h2{margin:0 0 6px;font-size:20px;letter-spacing:-.3px}
+  .pane p{margin:0 0 16px;color:var(--muted);font-size:14px;line-height:1.55}
+  .pane ol{margin:0 0 18px;padding-left:20px;color:var(--ink);font-size:13.5px;line-height:1.7}
+  .pane code{background:var(--surface);padding:1px 6px;border-radius:5px;font-size:12.5px}
+  .field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+  .field label{font-size:12px;font-weight:600;color:var(--muted)}
+  .field input{border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:13.5px}
+  .field input:focus{outline:none;border-color:var(--live)}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .primary{background:var(--live);color:#fff;border:none;padding:10px 18px;border-radius:8px;font-size:13.5px;font-weight:650}
+  .primary:hover{filter:brightness(1.06)}
+  .ghost{background:var(--panel);border:1px solid var(--line);color:var(--ink);padding:10px 16px;border-radius:8px;font-size:13.5px;font-weight:600}
+  .ghost:hover{border-color:var(--live);color:var(--live)}
+  .danger{color:var(--urgent)} .danger:hover{border-color:var(--urgent);color:var(--urgent)}
+  .note{font-size:12px;color:var(--faint);line-height:1.5;margin-top:4px}
+  .err{color:var(--urgent);font-size:13px;background:var(--urgent-soft);padding:10px 12px;border-radius:8px;margin-bottom:14px;display:none}
+  .err.show{display:block}
+
+  .modal{position:fixed;inset:0;background:var(--backdrop);display:none;place-items:center;padding:20px;z-index:50}
+  .modal.show{display:grid}
+  .modal .pane{max-height:88vh;overflow:auto}
+  .modal h2{display:flex;align-items:center;justify-content:space-between}
+  .x{border:none;background:none;font-size:22px;color:var(--muted);line-height:1;padding:0 4px}
+  .dstatus{margin:2px 0 16px}
+  .dsec{font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--faint);margin:18px 0 2px}
+  .drow{display:flex;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .drow>span{flex:0 0 116px;color:var(--muted);font-weight:600}
+  .drow>div{flex:1;color:var(--ink);word-break:break-word;line-height:1.45}
+  #detail .blocker{display:block;margin-top:14px}
+  #detail .blocker label{font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px}
+  #detail .blocker input{border-color:var(--line)}
+  .seg button:disabled,.seg button.segdis{opacity:.4;cursor:not-allowed}
+  #detail .pane{max-width:560px}
+  .ovrow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .ovrow>span:first-child{color:var(--muted)}
+  .ovseg{display:flex;gap:5px}
+  .ovbtn{border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:12px;font-weight:600;padding:5px 10px;border-radius:7px;cursor:pointer}
+  .ovbtn.on{border-color:var(--live);color:var(--live)}
+  .imglink{display:inline-block;margin:4px 0 2px;color:var(--live);font-size:13px;font-weight:600;text-decoration:none}
+  .imglink:hover{text-decoration:underline}
+  .detailimg{display:block;max-width:100%;margin-top:10px;border:1px solid var(--line);border-radius:8px}
+  .imgfail{margin-top:10px;font-size:12.5px;color:var(--muted)}
+</style>
+
+<div class="topbar">
+  <div class="brand"><b>Plug In Dashboard</b><span>Connecteam shifts · by engineer</span></div>
+  <div class="live" id="livePill"><span class="dot"></span><span id="liveText">Live</span></div>
+  <div class="spacer"></div>
+  <div class="updated" id="updated"></div>
+  <button class="tbtn bell" id="bellBtn" title="Notifications" aria-label="Notifications"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="bellbadge" id="notifBadge" hidden>0</span></button>
+  <button class="tbtn" id="themeBtn" title="Toggle dark mode"></button>
+  <button class="tbtn" id="refreshBtn">Refresh</button>
+  <button class="tbtn" id="settingsBtn">Settings</button>
+</div>
+
+<div class="tabs" id="tabs" style="display:none">
+  <button class="tab on" data-tab="board" id="tabBoard">Board</button>
+  <button class="tab" data-tab="calendar" id="tabCalendar">Calendar</button>
+  <button class="tab" data-tab="orders" id="tabOrders">Orders</button>
+  <button class="tab" data-tab="tasks" id="tabTasks">Tasks <span class="tabbadge" id="taskBadge" hidden>0</span></button>
+  <button class="tab" data-tab="flow" id="tabFlow">Flow <span class="tabbadge" id="flowBadge" hidden>0</span></button>
+  <span class="tabspacer"></span>
+  <button class="tab" data-tab="stock" id="tabStock">Stock <span class="tabbadge" id="stockBadge" hidden>0</span></button>
+  <button class="tab" data-tab="errors" id="tabErrors">Errors <span class="tabbadge" id="errBadge" hidden>0</span></button>
+</div>
+
+<div class="summary" id="summary" style="display:none"></div>
+<div id="errbar" class="err"></div>
+<div class="board" id="board"></div>
+<div class="calview" id="calview" style="display:none"></div>
+<div class="ordersview" id="ordersview" style="display:none"></div>
+<div class="tasksview" id="tasksview" style="display:none"></div>
+<div class="flowview" id="flowview" style="display:none"></div>
+<div class="stockview" id="stockview" style="display:none"></div>
+<div class="errview" id="errview" style="display:none"></div>
+<div id="printarea"></div>
+
+<!-- notifications dropdown (opened by the bell) -->
+<div class="notifpanel" id="notifPanel" hidden>
+  <div class="notifhead">Notifications</div>
+  <div class="notifbody" id="notifBody"></div>
+</div>
+
+<!-- first-run / no-feed state -->
+<div class="center" id="setup">
+  <div class="pane">
+    <h2>Connect your shift feed</h2>
+    <p>This board reads shifts from a Google Sheet that your Connecteam Zaps write to. Publish that sheet as CSV and paste the link below.</p>
+    <ol>
+      <li>In the Sheet: <b>File → Share → Publish to web</b>.</li>
+      <li>Pick the tab your Zap writes to, choose <b>Comma-separated values (.csv)</b>, and Publish.</li>
+      <li>Copy the link (it looks like <code>…/pub?gid=0&single=true&output=csv</code>) and paste it here.</li>
+    </ol>
+    <div class="field">
+      <label for="setupUrl">Published CSV link</label>
+      <input id="setupUrl" placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?output=csv" />
+    </div>
+    <div class="row">
+      <button class="primary" id="setupSave">Connect feed</button>
+      <button class="ghost" id="setupDemo">Load demo data</button>
+    </div>
+    <p class="note">Publishing makes the sheet readable by anyone with the link. Keep only the columns the board needs (below) on the published tab.</p>
+    <p class="note">Expected columns (header row, any order): <code>shift_id</code>, <code>engineer</code>, <code>job_title</code>, <code>start</code>, <code>end</code>, <code>location</code>, <code>notes</code>. Only <code>engineer</code> and <code>job_title</code> are required; <code>shift_id</code> is strongly recommended so updated shifts replace the old card instead of duplicating.</p>
+  </div>
+</div>
+
+<!-- settings modal -->
+<div class="modal" id="modal">
+  <div class="pane">
+    <h2>Settings <button class="x" id="modalClose">×</button></h2>
+    <div class="field">
+      <label for="cfgApi">Live API URL (Apps Script — enables shared flags + no cache)</label>
+      <input id="cfgApi" placeholder="https://script.google.com/macros/s/…/exec" />
+      <p class="note">Paste your Apps Script web-app /exec URL to read and write live through the sheet. When set, this replaces the CSV links below and status flags are shared across everyone's board. Leave blank to use the CSV links.</p>
+    </div>
+    <div class="field">
+      <label for="cfgUrl">Published CSV link</label>
+      <input id="cfgUrl" placeholder="https://docs.google.com/…/pub?output=csv" />
+    </div>
+    <div class="field">
+      <label for="cfgSecs">Auto-refresh (seconds)</label>
+      <input id="cfgSecs" type="number" min="10" step="5" />
+    </div>
+    <div class="field">
+      <label for="cfgHook">Delete webhook URL (optional)</label>
+      <input id="cfgHook" placeholder="https://hooks.zapier.com/hooks/catch/…" />
+      <p class="note">Set this to make card deletes (jobs and errors) also remove the row from the matching sheet, via a Google Apps Script web app (or Zapier). Leave blank and deletes just hide the card for you.</p>
+    </div>
+    <div class="field">
+      <label for="cfgErrUrl">Errors CSV link (optional)</label>
+      <input id="cfgErrUrl" placeholder="https://docs.google.com/…/pub?output=csv" />
+      <p class="note">A second published-CSV link — the sheet tab your erroring Zap writes to. Its rows appear under the Errors tab as cards you can action.</p>
+    </div>
+    <div class="field">
+      <label for="cfgStockUrl">Stock Alerts CSV link (optional)</label>
+      <input id="cfgStockUrl" placeholder="https://docs.google.com/…/pub?output=csv" />
+      <p class="note">Published-CSV link for the "Plugin Stock Alerts" tab. Its rows appear under the Stock tab. Ignored when the Live API URL is set.</p>
+    </div>
+    <div class="field">
+      <label for="cfgFlowUrl">Flow log — Connecteam+Zapier CSV (optional)</label>
+      <input id="cfgFlowUrl" placeholder="https://docs.google.com/…/pub?output=csv" />
+      <p class="note">Your deduction Zap's log: one row per run with the Connecteam input and what Zapier did. Shows in the Flow tab.</p>
+    </div>
+    <div class="field">
+      <label for="cfgSortlyUrl">Separate Sortly log CSV (optional / advanced)</label>
+      <input id="cfgSortlyUrl" placeholder="https://docs.google.com/…/pub?output=csv" />
+      <p class="note">Only needed if you capture Sortly independently. Normally leave blank — Sortly's result rides in the Automation Log (removed) and Quantities Log (cu_updated / cable_updated).</p>
+    </div>
+    <div class="field">
+      <label for="cfgQtyUrl">CU / Cable adjust CSV (optional)</label>
+      <input id="cfgQtyUrl" placeholder="https://docs.google.com/…/pub?output=csv" />
+      <p class="note">Your separate CU/cable deduction Zap's log — needs a serial column plus cu_adjust / cable_adjust. Merged into each Flow run by serial.</p>
+    </div>
+    <div class="row" style="margin-bottom:16px">
+      <button class="primary" id="cfgSave">Save</button>
+      <button class="ghost" id="cfgDemo">Load demo data</button>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:4px 0 16px">
+    <div class="row">
+      <button class="ghost" id="cfgRestore">Restore hidden jobs</button>
+      <button class="ghost danger" id="cfgClear">Clear all my status flags</button>
+    </div>
+    <p class="note">Status flags and hidden jobs are stored on this board for you only. Shift content always comes live from the sheet.</p>
+    <p class="note" id="buildNote" style="opacity:.7"></p>
+  </div>
+</div>
+
+<!-- job detail modal -->
+<div class="modal" id="detail">
+  <div class="pane">
+    <h2 id="detailTitle">Job<button class="x" id="detailClose">×</button></h2>
+    <div id="detailBody"></div>
+  </div>
+</div>
+
+<!-- Your saved settings (URLs, optional passcode). Create config.js once in the repo;
+     board updates never overwrite it. If it's missing, the board just uses Settings. -->
+<script src="config.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- storage (persists across sessions; falls back to memory) ---------- */
+  var mem = {};
+  var hasStore = false, hasLS = false;
+  try{ hasStore = typeof window.storage !== "undefined" && !!window.storage; }catch(e){}
+  try{ hasLS = typeof localStorage !== "undefined"; if(hasLS) localStorage.getItem("__fb_probe"); }catch(e){ hasLS=false; }
+  // Tiers: window.storage (in claude.ai) -> localStorage (standalone/hosted) -> memory
+  async function sGet(k){
+    if(hasStore){ try{ var r=await window.storage.get(k); return r?JSON.parse(r.value):null; }catch(e){ return null; } }
+    if(hasLS){ try{ var v=localStorage.getItem("fb_"+k); return v?JSON.parse(v):null; }catch(e){ return null; } }
+    return mem[k]!==undefined?mem[k]:null;
+  }
+  async function sSet(k,v){
+    if(hasStore){ try{ await window.storage.set(k, JSON.stringify(v)); return; }catch(e){} }
+    if(hasLS){ try{ localStorage.setItem("fb_"+k, JSON.stringify(v)); return; }catch(e){} }
+    mem[k]=v;
+  }
+
+  /* ---------- state ---------- */
+  var cfg = { url:"", secs:60, delHook:"", theme:"dark", errUrl:"", apiUrl:"", stockUrl:"", flowUrl:"", sortlyUrl:"", qtyUrl:"", tasksUrl:"" };
+  var statuses = {};          // shiftId -> { status, blocker }
+  var dismissed = {};         // shiftId -> true (hidden from this board)
+  var shifts = [];
+  var errors = [];            // parsed error items (ids prefixed "err::")
+  var errState="", errCount=0, errLooksLikeJobs=false;
+  var stock = [];             // parsed stock-alert items (ids prefixed "stk::")
+  var stockState="", stockCount=0;
+  var flow = [];              // parsed automation runs (ids prefixed "flw::")
+  var flowRaw = [], sortlyIdx = {}, qtyIdx = {};
+  var flowState="", flowCount=0;
+  var tasks = [];             // shared task board (ids prefixed "tsk::")
+  var taskWeek = null;        // Monday of the displayed week
+  var currentTab = "board";
+  var timer = null, lastOk = 0;
+
+  var STAT = { pending:"pending", actioned:"actioned", urgent:"urgent" };
+  var el = function(id){ return document.getElementById(id); };
+  var BUILD = "2026-09-05h · tasks-people-subtasks";
+
+  /* ---------- header normalisation ---------- */
+  var MAP = {
+    shift_id:["shift_id","shiftid","id","shift id","shift_id "],
+    engineer:["engineer","assigned_engineer","assigned engineer","engineer_assigned","engineer_name","engineer name","assignee","assigned","assigned to","assigned_to","technician","tech","installer","fitter","operative","employee","staff","team member","team_member","worker","user","name"],
+    job_title:["job_title","job title","job","title","task","description","work","service","job type","job_type","summary","subject","shift"],
+    start:["start","job_dates","job_date","job dates","job date","start_time","start time","from","date","starts","start_date"],
+    end:["end","end_time","end time","to","ends","finish"],
+    location:["location","address","site","place","postcode"],
+    notes:["notes","job_notes","job_note","job notes","job note","note","comment","comments","detail","details"],
+    updated_at:["updated_at","last_modified","modified","timestamp","updated"],
+    status:["status","state"]
+  };
+  function canon(s){ return String(s).toLowerCase().replace(/[^a-z0-9]/g,""); }
+  function buildRow(raw){ var row={}; Object.keys(raw).forEach(function(k){ row[canon(k)]=raw[k]; }); return row; }
+  function pick(row, keys){
+    for(var i=0;i<keys.length;i++){ var ck=canon(keys[i]); if(row[ck]!==undefined && row[ck]!=="") return String(row[ck]).trim(); }
+    return "";
+  }
+  function synMatch(list, key){ var ck=canon(key); for(var i=0;i<list.length;i++){ if(canon(list[i])===ck) return true; } return false; }
+  function normRow(raw){
+    var row=buildRow(raw);
+    var o={};
+    Object.keys(MAP).forEach(function(field){ o[field]=pick(row, MAP[field]); });
+    o._raw = raw;                                 // original columns, for the detail view
+    return o;
+  }
+
+  /* ---------- flow (Connecteam -> Zapier -> Sortly) ---------- */
+  var FMAP = {
+    flow_id:["flow_id","id","run_id","ref","reference"],
+    when:["time","date","timestamp","when","datetime","logged","run_time"],
+    engineer:["engineer","assigned_engineer","assigned engineer","name","staff","user","technician"],
+    serial:["charger_serial","serial","serial number","serialno","charger serial","charger","sn"],
+    cu:["cu","cu_type","consumer unit","consumerunit","board","cu type","unit"],
+    cable:["cable","cable_meters","cable meters","cable_m","meters","metres","cable used","cable_used"],
+    job:["job","site","address","job ref","job_ref","order"],
+    z_matched:["charger_found","matched","found","charger found","match","charger_matched"],
+    z_remove:["remove_charger","charger_removed","removed","remove charger","zap_removed","charger removed"],
+    z_cu:["cu_adjust","cu adjust","cu_qty","cu change","cu_change","cu qty"],
+    z_cable:["cable_adjust","cable adjust","cable_change","cable change","cable qty","cable_qty"],
+    z_error:["zap_error","zapier_error","code_error","zap error","error"],
+    s_removed:["sortly_removed","sortly_charger_removed","sortly charger removed","stock_removed","sortly removed","removed","charger_removed"],
+    s_cu:["sortly_cu_updated","sortly_cu","sortly cu","cu_updated","sortly cu updated"],
+    s_cable:["sortly_cable_updated","sortly_cable","sortly cable","cable_updated","sortly cable updated"],
+    s_error:["sortly_error","sortly_status","sortly error"]
+  };
+  function normFlow(raw){ var row=buildRow(raw); var o={}; Object.keys(FMAP).forEach(function(f){ o[f]=pick(row,FMAP[f]); }); o._raw=raw; return o; }
+  function toFlow(rows){
+    var out=[], byId={};
+    rows.forEach(function(raw){
+      var f=normFlow(raw);
+      if(!f.engineer && !f.serial && !f.when) return;
+      var base=f.flow_id || (f.when+"|"+f.engineer+"|"+f.serial).replace(/\s+/g," ").slice(0,120);
+      f.id="flw::"+base;
+      if(byId[f.id]!==undefined){ out[byId[f.id]]=f; } else { byId[f.id]=out.length; out.push(f); }
+    });
+    return out;
+  }
+  function yn(v){
+    var c=canon(v); if(!c) return null;
+    if(/^(yes|y|true|1|done|removed|updated|adjusted|success|ok|complete|completed|found)$/.test(c)) return true;
+    if(/^(no|n|false|0|error|fail|failed|notfound|missing|none)$/.test(c)) return false;
+    return null;
+  }
+  function flowStatus(f){
+    var zerr=!!(f.z_error&&f.z_error.trim()), serr=!!(f.s_error&&f.s_error.trim()), qerr=!!(f.q_error&&f.q_error.trim());
+    var matched=yn(f.z_matched), zrem=yn(f.z_remove), srem=yn(flowRemoved(f));
+    if(zerr||serr||qerr||matched===false||(zrem===true&&srem===false)) return "fail";
+    // an intended action with unconfirmed Sortly result, or any unknowns -> check
+    if((zrem===true&&srem!==true) || (f.z_cu&&yn(flowCu(f))!==true) || (f.z_cable&&yn(flowCable(f))!==true)) return "check";
+    return "ok";
+  }
+  // Sortly result comes from its own feed, merged into each run by charger serial
+  var SORTLYMAP = {
+    serial:["serial","charger_serial","serial number","charger","sn","item","sku","name"],
+    s_removed:["removed","charger_removed","sortly_removed","deleted","sortly removed"],
+    s_cu:["cu_updated","sortly_cu_updated","cu","cu_qty","sortly cu"],
+    s_cable:["cable_updated","sortly_cable_updated","cable","cable_qty","sortly cable"],
+    s_error:["error","sortly_error","status_error","sortly error"],
+    when:["time","date","timestamp","when","activity_date","logged"]
+  };
+  function normSortly(raw){ var row=buildRow(raw); var o={}; Object.keys(SORTLYMAP).forEach(function(f){ o[f]=pick(row,SORTLYMAP[f]); }); o._raw=raw; return o; }
+  function buildSortlyIdx(rows){ var idx={}; (rows||[]).forEach(function(r){ var o=normSortly(r); if(o.serial) idx[canon(o.serial)]=o; }); return idx; }
+  // CU/cable adjustments come from a separate Zap's log, merged by serial
+  var QTYMAP = {
+    serial:["serial","charger_serial","serial number","charger","sn"],
+    z_cu:["cu_adjust","cu adjust","cu_change","cu change","cu_qty","cu","cus"],
+    z_cable:["cable_adjust","cable adjust","cable_change","cable change","cable_qty","cable","cable_m","cable m"],
+    cu_type:["cu_type","cu type","cutype"],
+    cu_error:["cu_error","cu err","cuerror"],
+    cable_error:["cable_error","cable err","cableerror"],
+    s_cu:["cu_updated","sortly_cu_updated","cu updated"],
+    s_cable:["cable_updated","sortly_cable_updated","cable updated"],
+    when:["time","date","timestamp","when","logged"]
+  };
+  function normQty(raw){ var row=buildRow(raw); var o={}; Object.keys(QTYMAP).forEach(function(f){ o[f]=pick(row,QTYMAP[f]); }); o._raw=raw; return o; }
+  function buildQtyIdx(rows){ var idx={}; (rows||[]).forEach(function(r){ var o=normQty(r); if(o.serial) idx[canon(o.serial)]=o; }); return idx; }
+  function mergeFlow(){
+    flowRaw.forEach(function(f){
+      var key=f.serial&&canon(f.serial);
+      var s = key && sortlyIdx[key];
+      if(s){ if(s.s_removed!=="")f.s_removed=s.s_removed; if(s.s_cu!=="")f.s_cu=s.s_cu; if(s.s_cable!=="")f.s_cable=s.s_cable; if(s.s_error)f.s_error=s.s_error; }
+      var cuErr="", cabErr="";
+      var q = key && qtyIdx[key];
+      if(q){
+        if(q.z_cu!=="") f.z_cu=q.z_cu;
+        if(q.z_cable!=="") f.z_cable=q.z_cable;
+        if(q.cu_type && !f.cu) f.cu=q.cu_type;
+        if(q.s_cu!=="") f.s_cu=q.s_cu;
+        if(q.s_cable!=="") f.s_cable=q.s_cable;
+        cuErr=q.cu_error||""; cabErr=q.cable_error||"";
+        f.q_error = [cuErr, cabErr].filter(Boolean).join("; ");
+      }
+      // Sortly stage = Zapier's intent, taken as done unless that step errored.
+      // (Only derived when no explicit Sortly result was captured.)
+      var zerr = f.z_error && f.z_error.trim();
+      if((f.s_removed===""||f.s_removed==null) && yn(f.z_remove)===true) f.s_removed = zerr ? "no" : "yes";
+      if((f.s_cu===""||f.s_cu==null) && f.z_cu!=="" && f.z_cu!=null) f.s_cu = cuErr ? "no" : "yes";
+      if((f.s_cable===""||f.s_cable==null) && f.z_cable!=="" && f.z_cable!=null) f.s_cable = cabErr ? "no" : "yes";
+    });
+    flow = flowRaw;
+  }
+
+  /* ---------- stock alerts: mapping + parse ---------- */
+  var SMAP = {
+    alert_id:["alert_id","id","alertid","ref","reference"],
+    engineer:["engineer","assigned_engineer","assigned engineer","engineer_name","engineer name","name","assignee","staff","user","technician","fitter","installer","operative"],
+    item:["item","stock","material","product","part","description","stock item"],
+    serial:["serial","serial_number","serial number","charger_serial","charger serial","charger","sn"],
+    qty:["qty","quantity","amount","used","count","no","number"],
+    job:["job","job_id","job ref","job_ref","site","address","order","job title","location"],
+    when:["time","date","timestamp","when","datetime","logged","used_on","date used"],
+    message:["message","note","detail","details","reason","alert","comment","issue"],
+    image:["image","image_url","image url","imageurl","img","photo","picture","image link","imagelink","link","screenshot"]
+  };
+  function normStock(raw){
+    var row=buildRow(raw);
+    var o={};
+    Object.keys(SMAP).forEach(function(field){ o[field]=pick(row, SMAP[field]); });
+    o._raw = raw;
+    return o;
+  }
+  function toStock(rows){
+    var out=[], byId={};
+    rows.forEach(function(raw){
+      var s=normStock(raw);
+      if(!s.engineer && !s.item && !s.message && !s.serial) return;
+      var base = s.alert_id || (s.when+"|"+s.engineer+"|"+s.item+"|"+s.job).replace(/\s+/g," ").slice(0,120);
+      s.id="stk::"+base;
+      if(byId[s.id]!==undefined){ out[byId[s.id]]=s; } else { byId[s.id]=out.length; out.push(s); }
+    });
+    return out;
+  }
+
+  /* ---------- errors: mapping + parse ---------- */
+  var EMAP = {
+    error_id:["error_id","id","errorid","error id","ref","reference"],
+    when:["time","timestamp","date","when","datetime","created","error_time","logged"],
+    zap:["zap","zap_name","zapname","name","title","source","workflow","automation"],
+    message:["message","error","error_message","details","detail","description","body","text","reason"],
+    step:["step","action","stage"],
+    serial:["serial","serial number","serial_number","serialnumber","serialno","sn"],
+    image:["image","image_url","image url","imageurl","img","photo","picture","image link","imagelink","screenshot"]
+  };
+  function normErr(raw){
+    var row=buildRow(raw);
+    var o={};
+    Object.keys(EMAP).forEach(function(field){ o[field]=pick(row, EMAP[field]); });
+    o._raw = raw;
+    return o;
+  }
+  function toErrors(rows){
+    var out=[], byId={};
+    rows.forEach(function(raw){
+      var e=normErr(raw);
+      if(!e.message && !e.zap && !e.serial) return;    // skip truly blank lines
+      var base = e.error_id || (e.when+"|"+(e.message||e.zap||"")+"|"+(e.serial||"")).replace(/\s+/g," ").slice(0,120);
+      e.id = "err::"+base;
+      if(byId[e.id]!==undefined){ out[byId[e.id]] = e; }  // last wins
+      else { byId[e.id]=out.length; out.push(e); }
+    });
+    return out;
+  }
+
+  /* ---------- parse + dedupe (shifts) ---------- */
+  function toShifts(rows){
+    var out=[], byId={};
+    rows.forEach(function(raw){
+      var r=normRow(raw);
+      if(!r.engineer && !r.job_title) return;         // skip blank lines
+      r.engineer = r.engineer || "Unassigned";
+      r.job_title = r.job_title || "(untitled job)";
+      // stable id: prefer real shift_id, else composite
+      r.id = r.shift_id || (r.engineer+"|"+r.job_title+"|"+r.start).replace(/\s+/g," ");
+      if(byId[r.id]!==undefined){
+        // keep the newer of the two (updated shift wins)
+        var prev = out[byId[r.id]];
+        var a = Date.parse(r.updated_at)||0, b = Date.parse(prev.updated_at)||0;
+        if(a>=b) out[byId[r.id]] = r;                 // ties -> later row wins
+      } else { byId[r.id]=out.length; out.push(r); }
+    });
+    return out;
+  }
+
+  /* ---------- fetch ---------- */
+  function bust(url){ return url + (url.indexOf("?")>-1?"&":"?") + "_ts=" + Date.now(); }
+  async function fetchShifts(showErr){
+    if(!cfg.url) return;
+    try{
+      var res = await fetch(bust(cfg.url), { cache:"no-store" });
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      var text = await res.text();
+      if(/<html/i.test(text)) throw new Error("That link returned a web page, not CSV. Re-publish the tab as CSV.");
+      var parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+      shifts = toShifts(parsed.data);
+      lastOk = Date.now();
+      hideErr();
+      render();
+    }catch(e){
+      var msg = e.message||String(e);
+      var blocked = /failed to fetch|networkerror|load failed|cors/i.test(msg);
+      if(showErr){
+        showError(blocked
+          ? "The browser blocked the fetch. Two fixes, together: (1) serve this board from a web address (http/https) \u2014 opening it as a local file:// is blocked by the browser too, so host it (GitHub Pages, Netlify Drop, your intranet, or a local server); (2) use the Publish-to-web CSV link (\u2026/d/e/\u2026/pub?output=csv), which allows cross-site reads. Press F12 \u2192 Console for the exact reason. (Raw: "+msg+")"
+          : "Couldn't load the feed: "+msg);
+      }
+      markStale();
+    }
+  }
+
+  async function fetchErrors(){
+    if(!cfg.errUrl){ errors=[]; errState="none"; return; }
+    try{
+      var res = await fetch(bust(cfg.errUrl), { cache:"no-store" });
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      var text = await res.text();
+      if(/<html/i.test(text)){ errState="notcsv"; errors=[]; render(); return; }
+      var parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+      errCount = parsed.data.length;
+      var headers = (parsed.meta && parsed.meta.fields) ? parsed.meta.fields : [];
+      errLooksLikeJobs = headers.some(function(h){ return synMatch(MAP.engineer,h); })
+                      || headers.some(function(h){ return synMatch(MAP.job_title,h); });
+      errors = toErrors(parsed.data);
+      errState = "ok";
+      render();
+    }catch(e){
+      var msg = e.message||String(e);
+      errState = /failed to fetch|networkerror|load failed|cors/i.test(msg) ? "blocked" : "error";
+      render();
+    }
+  }
+  async function fetchStock(){
+    if(!cfg.stockUrl){ stock=[]; stockState="none"; return; }
+    try{
+      var res = await fetch(bust(cfg.stockUrl), { cache:"no-store" });
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      var text = await res.text();
+      if(/<html/i.test(text)){ stockState="notcsv"; stock=[]; render(); return; }
+      var parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+      stockCount = parsed.data.length;
+      stock = toStock(parsed.data);
+      stockState="ok";
+      render();
+    }catch(e){
+      var msg=e.message||String(e);
+      stockState=/failed to fetch|networkerror|load failed|cors/i.test(msg)?"blocked":"error";
+      render();
+    }
+  }
+  async function fetchFlow(){
+    if(!cfg.flowUrl){ flowRaw=[]; flowState="none"; mergeFlow(); return; }
+    try{
+      var res=await fetch(bust(cfg.flowUrl),{cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      var text=await res.text();
+      if(/<html/i.test(text)){ flowState="notcsv"; flowRaw=[]; mergeFlow(); render(); return; }
+      var parsed=Papa.parse(text,{header:true,skipEmptyLines:true});
+      flowCount=parsed.data.length; flowRaw=toFlow(parsed.data); flowState="ok"; mergeFlow(); render();
+    }catch(e){ var m=e.message||String(e); flowState=/failed to fetch|networkerror|load failed|cors/i.test(m)?"blocked":"error"; render(); }
+  }
+  async function fetchSortly(){
+    if(!cfg.sortlyUrl){ sortlyIdx={}; mergeFlow(); return; }
+    try{
+      var res=await fetch(bust(cfg.sortlyUrl),{cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      var text=await res.text();
+      if(/<html/i.test(text)) return;
+      var parsed=Papa.parse(text,{header:true,skipEmptyLines:true});
+      sortlyIdx=buildSortlyIdx(parsed.data); mergeFlow(); render();
+    }catch(e){}
+  }
+  async function fetchQty(){
+    if(!cfg.qtyUrl){ qtyIdx={}; mergeFlow(); return; }
+    try{
+      var res=await fetch(bust(cfg.qtyUrl),{cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      var text=await res.text();
+      if(/<html/i.test(text)) return;
+      var parsed=Papa.parse(text,{header:true,skipEmptyLines:true});
+      qtyIdx=buildQtyIdx(parsed.data); mergeFlow(); render();
+    }catch(e){}
+  }
+  async function fetchTasks(){
+    if(!cfg.tasksUrl){ tasks = cfg.apiUrl?tasks:[]; return; }
+    try{
+      var res=await fetch(bust(cfg.tasksUrl),{cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      var text=await res.text();
+      if(/<html/i.test(text)) return;
+      var parsed=Papa.parse(text,{header:true,skipEmptyLines:true});
+      tasks=toTasks(parsed.data); absorbStatuses(); render();
+    }catch(e){}
+  }
+  function refreshAll(showErr){
+    if(cfg.apiUrl){ fetchData(showErr); return; }
+    fetchShifts(showErr); fetchErrors(); fetchStock(); fetchFlow(); fetchSortly(); fetchQty(); fetchTasks();
+  }
+
+  /* ---------- live mode (Apps Script) ---------- */
+  var STATUS_HDRS=["status","state"];
+  var NOTE_HDRS=["note","status_note","statusnote"];
+  var CTYPE_HDRS=["charger_type","chargertype"];
+  var LINK_HDRS=["charger_sorted","chargersorted","link_done"];
+  var OV_MAP={ ov_removed:["ov_removed","override_removed"], ov_cu:["ov_cu","override_cu"], ov_cable:["ov_cable","override_cable"] };
+  function canonStatus(v){
+    var c=canon(v);
+    if(c==="actioned"||c==="resolved"||c==="complete"||c==="completed"||c==="done") return "actioned";
+    if(c==="urgent"||c==="blocked"||c==="stuck") return "urgent";
+    return "pending";
+  }
+  function isErrId(id){ return String(id).indexOf("err::")===0; }
+  function isStkId(id){ return String(id).indexOf("stk::")===0; }
+  function isFlwId(id){ return String(id).indexOf("flw::")===0; }
+  function isTaskId(id){ return String(id).indexOf("tsk::")===0; }
+  function typeOf(id){ return isErrId(id)?"error":(isStkId(id)?"stock":(isFlwId(id)?"flow":(isTaskId(id)?"task":"job"))); }
+  function findItem(id){
+    var arr = isErrId(id)?errors:(isStkId(id)?stock:(isFlwId(id)?flow:(isTaskId(id)?tasks:shifts)));
+    for(var i=0;i<arr.length;i++){ if(arr[i].id===id) return arr[i]; }
+    return null;
+  }
+  function matchFor(it,id){ return isErrId(id)? errMatch(it) : (isStkId(id)? stockMatch(it) : (isFlwId(id)? flowMatch(it) : (isTaskId(id)? taskMatch(it) : jobMatch(it)))); }
+  function writeUrl(){ return cfg.apiUrl || cfg.delHook; }
+  function apiPost(fields){
+    var target = writeUrl(); if(!target) return;
+    try{
+      var body=new URLSearchParams();
+      Object.keys(fields).forEach(function(k){ body.set(k, fields[k]); });
+      fetch(target, { method:"POST", mode:"no-cors", body: body });
+    }catch(e){}
+  }
+  // JSONP so the browser can read Apps Script data across origins without CORS
+  function jsonp(url, params, cb){
+    var name="__pib"+Date.now()+Math.floor(Math.random()*1e4);
+    var q=Object.keys(params||{}).map(function(k){return encodeURIComponent(k)+"="+encodeURIComponent(params[k]);}).join("&");
+    var src=url+(url.indexOf("?")>-1?"&":"?")+q+"&callback="+name+"&_ts="+Date.now();
+    var s=document.createElement("script"), done=false;
+    function cleanup(){ try{delete window[name];}catch(e){window[name]=undefined;} if(s.parentNode) s.parentNode.removeChild(s); }
+    window[name]=function(data){ done=true; cleanup(); cb(null,data); };
+    s.onerror=function(){ if(!done){ cleanup(); cb(new Error("script load error")); } };
+    setTimeout(function(){ if(!done){ cleanup(); cb(new Error("timeout")); } }, 15000);
+    s.src=src; document.body.appendChild(s);
+  }
+  // in live mode the sheet is the single source of truth — nothing is hidden locally
+  function isHidden(id){ return !cfg.apiUrl && !!dismissed[id]; }
+  // confirmable call to the Apps Script (JSONP GET, so we can read the result)
+  function apiCall(params, cb){
+    if(!cfg.apiUrl){ if(cb) cb(new Error("no api url")); return; }
+    jsonp(cfg.apiUrl, params, function(err,data){ if(cb) cb(err,data); });
+  }
+  function absorbStatuses(){
+    shifts.concat(errors).concat(stock).concat(flow).concat(tasks).forEach(function(it){
+      var row=buildRow(it._raw||{});
+      var st=pick(row, STATUS_HDRS), nt=pick(row, NOTE_HDRS), ct=pick(row, CTYPE_HDRS);
+      if(st){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].status = (String(it.id).indexOf("tsk::")===0) ? canonTaskStatus(st) : canonStatus(st); }
+      if(nt!==""){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].blocker=nt; }
+      if(ct){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].ctype=canon(ct); }
+      var ld=pick(row, LINK_HDRS);
+      if(ld && /^(yes|true|1|done)$/i.test(canon(ld))){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].linkDone=true; }
+      var ovr=pick(row, OV_MAP.ov_removed), ovc=pick(row, OV_MAP.ov_cu), ovb=pick(row, OV_MAP.ov_cable);
+      if(ovr){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].ovRemoved=canon(ovr)==="yes"?"yes":(canon(ovr)==="no"?"no":""); }
+      if(ovc){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].ovCu=canon(ovc)==="yes"?"yes":(canon(ovc)==="no"?"no":""); }
+      if(ovb){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].ovCable=canon(ovb)==="yes"?"yes":(canon(ovb)==="no"?"no":""); }
+    });
+  }
+  function fetchData(showErr){
+    if(!cfg.apiUrl) return;
+    jsonp(cfg.apiUrl, { action:"data" }, function(err,data){
+      if(err || !data || !data.ok){
+        if(showErr) showError("Couldn't load live data from the Apps Script. Check the API URL, and that it's deployed with access set to 'Anyone'.");
+        markStale(); return;
+      }
+      shifts = toShifts(data.jobs||[]);
+      errors = toErrors(data.errors||[]);
+      stock = toStock(data.stock||[]);
+      flowRaw = toFlow(data.flow||[]);
+      sortlyIdx = buildSortlyIdx(data.sortlylog||[]);
+      qtyIdx = buildQtyIdx(data.qtylog||[]);
+      tasks = toTasks(data.tasks||[]);
+      mergeFlow();
+      errState="ok"; errCount=(data.errors||[]).length; errLooksLikeJobs=false;
+      stockState="ok"; stockCount=(data.stock||[]).length;
+      flowState="ok"; flowCount=(data.flow||[]).length;
+      absorbStatuses();
+      lastOk=Date.now(); hideErr(); render();
+    });
+  }
+
+  /* ---------- status helpers ---------- */
+  function statusOf(id){ return (statuses[id] && statuses[id].status) || (String(id).indexOf("tsk::")===0 ? "todo" : STAT.pending); }
+  function askChargerType(){
+    return new Promise(function(resolve){
+      var ov=document.createElement("div");
+      ov.className="modal show"; ov.style.zIndex="300";
+      ov.innerHTML='<div class="pane" style="max-width:320px;text-align:center">'
+        +'<div style="font-size:16px;font-weight:700;margin-bottom:4px">Which charger?</div>'
+        +'<div style="font-size:12.5px;color:var(--muted);margin-bottom:16px">Mark the type to move to Plug In stock</div>'
+        +'<div class="row" style="justify-content:center;gap:8px">'
+        +'<button class="ghost" data-t="5m">5m</button>'
+        +'<button class="ghost" data-t="8m">8m</button>'
+        +'<button class="ghost" data-t="epod">ePod</button></div>'
+        +'<button class="ghost" data-t="" style="margin-top:12px">Cancel</button></div>';
+      document.body.appendChild(ov);
+      function done(v){ if(ov.parentNode) ov.parentNode.removeChild(ov); resolve(v); }
+      Array.prototype.forEach.call(ov.querySelectorAll("[data-t]"), function(b){ b.onclick=function(){ done(b.getAttribute("data-t")||null); }; });
+      ov.onclick=function(e){ if(e.target===ov) done(null); };
+    });
+  }
+  async function setStatus(id, s){
+    if(isFlwId(id) && s==="actioned"){
+      var fitem=findItem(id), oe=fitem&&matchingOpenIssue(fitem);
+      if(oe){ showError("Sort the matching charger error / stock alert for "+(oe.serial||"this serial")+" first."); return; }
+    }
+    if(isStkId(id) && s==="urgent"){
+      var t=await askChargerType();
+      if(!t) return;                       // cancelled — leave status unchanged
+      statuses[id]=statuses[id]||{}; statuses[id].ctype=t;
+    }
+    statuses[id] = statuses[id] || {};
+    statuses[id].status = s;
+    if(s==="actioned") statuses[id].at = Date.now();
+    await sSet("statuses", statuses);
+    if(cfg.apiUrl){
+      var it=findItem(id);
+      if(it){ var payload={ action:"setstatus", type:typeOf(id), match:JSON.stringify(matchFor(it,id)), status:s }; if(statuses[id].ctype) payload.ctype=statuses[id].ctype; apiPost(payload); }
+    }
+    // actioning a linked error/stock item flips the flow run's charger tick
+    if((isErrId(id)||isStkId(id)) && s==="actioned"){ var it3=findItem(id); if(it3&&it3.serial) await markFlowChargerSorted(it3.serial); }
+    render();
+  }
+  async function setBlocker(id, txt){
+    statuses[id] = statuses[id] || {};
+    statuses[id].blocker = txt;
+    await sSet("statuses", statuses);           // no re-render: keep input focus
+    if(cfg.apiUrl){
+      var it=findItem(id);
+      if(it) apiPost({ action:"setstatus", type:typeOf(id), match:JSON.stringify(matchFor(it,id)), note:txt });
+    }
+  }
+  // Build the match payload the Apps Script uses to find the row.
+  // Prefer a single unique id; otherwise send the stable text columns
+  // (skipping the date column, which reformats between CSV and Sheets).
+  function stableRaw(raw, dateSyns){
+    var out={};
+    if(!raw) return out;
+    Object.keys(raw).forEach(function(k){
+      var v=String(raw[k]||"").trim();
+      if(!v) return;
+      if(dateSyns && synMatch(dateSyns, k)) return;   // skip the date/timestamp column
+      out[k]=v;
+    });
+    return out;
+  }
+  function jobMatch(s){ return (s && s.shift_id) ? { shift_id:s.shift_id } : stableRaw(s && s._raw, MAP.start); }
+  function errMatch(e){ return (e && e.error_id) ? { error_id:e.error_id } : stableRaw(e && e._raw, EMAP.when); }
+  function stockMatch(s){ return (s && s.alert_id) ? { alert_id:s.alert_id } : stableRaw(s && s._raw, SMAP.when); }
+  function flowMatch(f){ return (f && f.flow_id) ? { flow_id:f.flow_id } : stableRaw(f && f._raw, FMAP.when); }
+
+  async function clearCompleted(){
+    var done = shifts.filter(function(s){ return !isHidden(s.id) && statusOf(s.id)==="actioned"; });
+    if(!done.length) return;
+    if(!confirm("Delete "+done.length+" completed job"+(done.length>1?"s":"")+" from the sheet? This can't be undone.")) return;
+    if(cfg.apiUrl){
+      var ids={}; done.forEach(function(s){ ids[s.id]=1; });
+      shifts = shifts.filter(function(s){ return !ids[s.id]; });
+      render();
+      apiCall({ action:"clearcompleted", type:"job" }, function(err,res){
+        if(err || !res || !res.ok) showError("Couldn't clear completed rows"+((res&&res.error)?": "+res.error:"")+".");
+        fetchData(false);
+      });
+    } else {
+      done.forEach(function(s){ dismissed[s.id]=true; });
+      await sSet("dismissed", dismissed);
+      render();
+      if(cfg.delHook){ done.forEach(function(s){ try{ var b=new URLSearchParams(); b.set("type","job"); b.set("match",JSON.stringify(jobMatch(s))); fetch(cfg.delHook,{method:"POST",mode:"no-cors",body:b}); }catch(e){} }); }
+    }
+  }
+
+  async function deleteCard(id){
+    var type=typeOf(id);
+    var item=findItem(id);
+    var match = item ? JSON.stringify(matchFor(item,id)) : null;
+    var noun = type==="error"?"error":(type==="stock"?"stock alert":(type==="flow"?"automation run":"job"));
+    // deleting a linked error/stock also flips the flow run's charger tick
+    if((type==="error"||type==="stock") && item && item.serial) await markFlowChargerSorted(item.serial);
+
+    if(cfg.apiUrl){
+      if(!confirm("Delete this "+noun+"'s row from the sheet?")) return;
+      if(type==="error") errors=errors.filter(function(x){return x.id!==id;});
+      else if(type==="stock") stock=stock.filter(function(x){return x.id!==id;});
+      else if(type==="flow") flow=flow.filter(function(x){return x.id!==id;});
+      else shifts=shifts.filter(function(x){return x.id!==id;});
+      closeDetail(); render();
+      if(item){
+        apiCall({ action:"delete", type:type, match:match }, function(err,res){
+          if(err || !res || !res.ok){
+            showError("Couldn't delete that row from the sheet"+((res&&res.error)?": "+res.error:"")+". It'll reappear on the next refresh so nothing is silently lost.");
+          }
+          fetchData(false);
+        });
+        // a flow run's CU/cable row lives in the Quantities Log — remove it too (serial is single-use)
+        if(type==="flow" && item.serial){
+          apiCall({ action:"delete", type:"qty", match:JSON.stringify({serial:item.serial}) }, function(){ fetchData(false); });
+        }
+      }
+      return;
+    }
+
+    var msg = cfg.delHook
+      ? ("Delete this "+noun+"'s row from the sheet?")
+      : ("Remove this "+noun+"? Hides it on this laptop only.");
+    if(!confirm(msg)) return;
+    dismissed[id]=true; await sSet("dismissed", dismissed);
+    if(cfg.delHook && item){
+      try{ var body=new URLSearchParams(); body.set("type",type); body.set("match",match); await fetch(cfg.delHook,{method:"POST",mode:"no-cors",body:body}); }catch(e){}
+    }
+    closeDetail(); render();
+  }
+  async function restoreAll(){
+    dismissed = {};
+    await sSet("dismissed", dismissed);
+    render();
+  }
+  function hiddenCount(){ return Object.keys(dismissed).length; }
+
+  /* ---------- render ---------- */
+  var COLORS=["#0B7DD4","#1F9D57","#8B5CF6","#E8912B","#0EA5A5","#D8382F","#C2410C","#4F63D2"];
+  function colorFor(name){ var h=0; for(var i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))>>>0; return COLORS[h%COLORS.length]; }
+  function initials(name){ return name.split(/\s+/).map(function(w){return w[0]||"";}).slice(0,2).join("").toUpperCase(); }
+  function esc(s){ return (s||"").replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];}); }
+
+  var ICON = {
+    clock:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    pin:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+    check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    alert:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+    box:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
+    chat:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 9 9 0 0 1-4-.9L3 21l1.9-5.5A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z"/></svg>'
+  };
+
+  function render(){
+    var board = el("board");
+    if(!cfg.url && !cfg.apiUrl && !shifts.length){
+      el("setup").style.display="grid"; el("tabs").style.display="none";
+      board.style.display="none"; el("summary").style.display="none"; el("errview").style.display="none";
+      return;
+    }
+    el("setup").style.display="none"; el("tabs").style.display="flex";
+
+    // counts (dismissed cards are hidden from this board)
+    var visible = shifts.filter(function(s){ return !isHidden(s.id); });
+    var total=visible.length, p=0,a=0,u=0;
+    visible.forEach(function(s){ var st=statusOf(s.id); if(st==="urgent")u++; else if(st==="actioned")a++; else p++; });
+
+    // actioned jobs leave the engineer lanes and collect in the Completed column
+    var doneList = visible.filter(function(s){ return statusOf(s.id)==="actioned"; });
+    var activeList = visible.filter(function(s){ return statusOf(s.id)!=="actioned"; });
+
+    var engineers={};
+    activeList.forEach(function(s){ (engineers[s.engineer]=engineers[s.engineer]||[]).push(s); });
+    var names=Object.keys(engineers).sort(function(x,y){return x.localeCompare(y);});
+
+    el("summary").innerHTML =
+      stat("", names.length, "Engineers") +
+      stat("", total, "Jobs") +
+      stat("p", p, "Pending") +
+      stat("a", a, "Completed") +
+      stat("u"+(u>0?" hot":""), u, "Urgent") +
+      (a>0 ? '<button class="clearbtn" id="clearDone">Clear completed ('+a+')</button>' : '');
+    var cd=el("clearDone"); if(cd) cd.onclick=clearCompleted;
+
+    // preserve horizontal scroll across re-render
+    var sx = board.scrollLeft;
+    var cols = names.map(function(n){
+      var list = engineers[n].slice().sort(function(x,y){ return (Date.parse(x.start)||0)-(Date.parse(y.start)||0); });
+      var anyUrgent = list.some(function(s){ return statusOf(s.id)==="urgent"; });
+      var cards = list.map(function(s){ return cardHtml(s); }).join("") || '<div class="colempty">No open jobs</div>';
+      return '<div class="col"><div class="colhead">'+
+        '<div class="avatar" style="background:'+colorFor(n)+'">'+esc(initials(n))+'</div>'+
+        '<div class="colname" title="'+esc(n)+'">'+esc(n)+'</div>'+
+        (anyUrgent?'<span class="colflag" title="Has urgent jobs"></span>':'')+
+        '<div class="colcount">'+list.length+'</div>'+
+        '</div><div class="cards">'+cards+'</div></div>';
+    });
+    // Completed column (always shown, at the far right)
+    var doneSorted = doneList.slice().sort(function(x,y){
+      var ax=(statuses[x.id]&&statuses[x.id].at)||0, ay=(statuses[y.id]&&statuses[y.id].at)||0; return ay-ax;
+    });
+    var doneCards = doneSorted.map(function(s){ return cardHtml(s,{showEngineer:true}); }).join("") || '<div class="colempty">No completed jobs yet</div>';
+    cols.push('<div class="col col-done"><div class="colhead">'+
+      '<div class="avatar done">'+ICON.check+'</div>'+
+      '<div class="colname">Completed</div>'+
+      '<div class="colcount">'+doneList.length+'</div>'+
+      '</div><div class="cards">'+doneCards+'</div></div>');
+
+    board.innerHTML = cols.join("");
+    board.scrollLeft = sx;
+
+    wireCards(board);
+    renderErrors();
+    renderStock();
+    renderTasks();
+    renderFlow();
+    renderCalendar();
+    renderNotifications();
+    renderTabs();
+    applyTabVisibility();
+    setUpdated();
+  }
+
+  function wireCards(root){
+    Array.prototype.forEach.call(root.querySelectorAll(".seg button"), function(b){
+      b.onclick=function(e){ e.stopPropagation(); setStatus(b.getAttribute("data-id"), b.getAttribute("data-s")); };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll(".blocker input"), function(inp){
+      inp.onchange=function(){ setBlocker(inp.getAttribute("data-id"), inp.value); };
+      inp.onclick=function(e){ e.stopPropagation(); };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll(".carddel"), function(b){
+      b.onclick=function(e){ e.stopPropagation(); deleteCard(b.getAttribute("data-del")); };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll(".cardimg"), function(img){
+      img.onerror=function(){ img.style.display="none"; };
+    });
+    // whole card opens the detail view — except when a control inside it was clicked
+    Array.prototype.forEach.call(root.querySelectorAll(".card"), function(card){
+      card.onclick=function(ev){
+        if(ev.target.closest(".seg, .blocker, .carddel, .tksel, .tkdue, [data-ov]")) return;
+        openDetail(card.getAttribute("data-id"));
+      };
+    });
+  }
+
+  /* ---------- errors view + tabs ---------- */
+  function errorCardHtml(e){
+    var st=statusOf(e.id);
+    var blk=(statuses[e.id]&&statuses[e.id].blocker)||"";
+    var when=e.when?fmtTime(e.when):"";
+    var meta="";
+    if(when) meta+='<span class="m">'+ICON.clock+esc(when)+'</span>';
+    if(e.serial) meta+='<span class="m">SN: '+esc(e.serial)+'</span>';
+    if(e.step) meta+='<span class="m">'+esc(e.step)+'</span>';
+    var msg=e.message?'<div class="cardnote">'+esc(e.message)+'</div>':'';
+    var title=e.zap||"Zap error";
+    function seg(v,label){ return '<button data-id="'+esc(e.id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+label+'</button>'; }
+    return '<div class="card errcard s-'+st+'" data-id="'+esc(e.id)+'">'+
+      '<button class="carddel" data-del="'+esc(e.id)+'" title="Dismiss">\u00d7</button>'+
+      '<div class="card-body" data-open="'+esc(e.id)+'">'+
+        '<div class="title"><span class="errdot">'+ICON.alert+'</span><span>'+esc(title)+'</span></div>'+
+        (meta?'<div class="meta">'+meta+'</div>':'')+
+        msg+
+      '</div>'+
+      '<div class="seg">'+seg("pending","Open")+seg("actioned","Resolved")+seg("urgent","Urgent")+'</div>'+
+      '<div class="blocker"><input name="note" data-id="'+esc(e.id)+'" placeholder="Note (shown on urgent)" value="'+esc(blk)+'" /></div>'+
+      '</div>';
+  }
+
+  function renderErrors(){
+    var view=el("errview");
+    var vis = errors.filter(function(e){ return !isHidden(e.id); });
+    if(!vis.length){
+      var m;
+      if(!cfg.errUrl){
+        m='<b>No errors feed connected.</b><br>Point your erroring Zap at a Google Sheet tab (alongside the WhatsApp), publish that tab as CSV, and paste the link in Settings \u2192 Errors CSV link.';
+      } else if(errState==="blocked"){
+        m='<b>Couldn\u2019t load the errors feed.</b><br>The browser blocked the fetch \u2014 same rule as the jobs feed: use the Publish-to-web CSV link and run the board from an https host.';
+      } else if(errState==="notcsv"){
+        m='<b>That link isn\u2019t CSV.</b><br>Re-publish the Errors tab: File \u2192 Share \u2192 Publish to web \u2192 the Errors tab \u2192 Comma-separated values (.csv).';
+      } else if(errState==="error"){
+        m='<b>Couldn\u2019t read the errors feed.</b><br>Check the Errors CSV link in Settings.';
+      } else if(errState==="ok" && errLooksLikeJobs){
+        m='<b>That looks like your jobs tab, not an errors tab.</b><br>The Errors CSV link is pointing at a tab with engineer/job columns. Paste the link to the <i>Errors</i> tab instead (it has a different gid).';
+      } else if(errState==="ok" && errCount>0){
+        m='<b>Connected, but no error rows recognised.</b><br>The tab has '+errCount+' row(s), but none had a usable column. Make sure row 1 has headers and there\u2019s a column like <code>message</code> (the error text) or <code>zap</code> (the Zap name).';
+      } else if(errState==="ok"){
+        m='<b>Connected \u2014 no errors logged yet.</b><br>Nothing in the Errors tab so far. When your Zap writes one, it\u2019ll show up here.';
+      } else {
+        m='No errors to show yet.';
+      }
+      view.innerHTML='<div class="errempty">'+m+'</div>';
+      return;
+    }
+    function rank(e){ var s=statusOf(e.id); return s==="urgent"?0:(s==="actioned"?2:1); }
+    var sorted=vis.slice().sort(function(a,b){
+      var r=rank(a)-rank(b); if(r) return r;
+      return (Date.parse(b.when)||0)-(Date.parse(a.when)||0);
+    });
+    view.innerHTML='<div class="errgrid">'+sorted.map(errorCardHtml).join("")+'</div>';
+    wireCards(view);
+  }
+
+  function renderTabs(){
+    var openErr = errors.filter(function(e){ return !isHidden(e.id) && statusOf(e.id)!=="actioned"; }).length;
+    var eb=el("errBadge");
+    if(openErr>0){ eb.textContent=openErr; eb.hidden=false; } else { eb.hidden=true; }
+    var nb=el("notifBadge"), n=notifItems().length;
+    if(n>0){ nb.textContent=n; nb.hidden=false; } else { nb.hidden=true; }
+    var sb=el("stockBadge"), sn=stock.filter(function(s){ return !isHidden(s.id) && statusOf(s.id)!=="actioned"; }).length;
+    if(sn>0){ sb.textContent=sn; sb.hidden=false; } else { sb.hidden=true; }
+    var fb=el("flowBadge"), fn=flow.filter(function(f){ return !isHidden(f.id) && statusOf(f.id)!=="actioned" && flowStatus(f)!=="ok"; }).length;
+    if(fb){ if(fn>0){ fb.textContent=fn; fb.hidden=false; } else { fb.hidden=true; } }
+    var kb=el("taskBadge"), kn=tasks.filter(function(t){ return !isHidden(t.id) && statusOf(t.id)!=="done"; }).length;
+    if(kb){ if(kn>0){ kb.textContent=kn; kb.hidden=false; } else { kb.hidden=true; } }
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(t){
+      t.classList.toggle("on", t.getAttribute("data-tab")===currentTab);
+    });
+  }
+
+  function applyTabVisibility(){
+    var t=currentTab;
+    el("board").style.display    = t==="board"?"flex":"none";
+    el("summary").style.display  = t==="board"?"flex":"none";
+    el("calview").style.display  = t==="calendar"?"flex":"none";
+    el("ordersview").style.display = t==="orders"?"flex":"none";
+    el("tasksview").style.display = t==="tasks"?"flex":"none";
+    el("flowview").style.display = t==="flow"?"flex":"none";
+    el("stockview").style.display = t==="stock"?"block":"none";
+    el("errview").style.display  = t==="errors"?"block":"none";
+  }
+
+  function showTab(t){ currentTab=t; render(); if(t==="orders") renderOrders(); }
+
+  /* ---------- dates + calendar + notifications ---------- */
+  function parseDate(s){ if(!s) return null; var d=new Date(s); return isNaN(d)?null:d; }
+  function pad2(n){ return (n<10?"0":"")+n; }
+  function dayKey(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate()); }
+  function dayDiff(s){
+    var d=parseDate(s); if(!d) return null;
+    var a=new Date(); a.setHours(0,0,0,0);
+    var b=new Date(d); b.setHours(0,0,0,0);
+    return Math.round((b-a)/86400000);
+  }
+  function dayLabel(n){ return n<0?("Overdue by "+(-n)+(n===-1?" day":" days")):(n===0?"Today":(n===1?"Tomorrow":"In "+n+" days")); }
+
+  var MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var calMonth=null;   // Date anchored to the 1st of the displayed month
+
+  function renderCalendar(){
+    var view=el("calview");
+    var now=new Date();
+    if(!calMonth) calMonth=new Date(now.getFullYear(), now.getMonth(), 1);
+    var year=calMonth.getFullYear(), month=calMonth.getMonth();
+
+    // map visible jobs by day
+    var byDay={};
+    shifts.filter(function(s){ return !isHidden(s.id); }).forEach(function(s){
+      var d=parseDate(s.start); if(!d) return;
+      (byDay[dayKey(d)]=byDay[dayKey(d)]||[]).push(s);
+    });
+
+    var dow=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    var first=new Date(year,month,1);
+    var offset=(first.getDay()+6)%7;               // Monday-first
+    var cells=Math.ceil((offset+new Date(year,month+1,0).getDate())/7)*7;
+    var todayKey=dayKey(now);
+
+    var html='<div class="calbar">'+
+      '<button class="calnav" data-cal="prev" title="Previous month">\u2039</button>'+
+      '<button class="calnav" data-cal="next" title="Next month">\u203a</button>'+
+      '<button class="caltoday" data-cal="today">Today</button>'+
+      '<div class="calmonth">'+MONTHS[month]+" "+year+'</div>'+
+    '</div><div class="calgrid">';
+    dow.forEach(function(d){ html+='<div class="caldow">'+d+'</div>'; });
+    for(var i=0;i<cells;i++){
+      var date=new Date(year,month,1-offset+i);
+      var inMonth=date.getMonth()===month;
+      var k=dayKey(date);
+      var jobs=byDay[k]||[];
+      var chips="";
+      jobs.slice(0,3).forEach(function(s){
+        chips+='<div class="calchip s-'+statusOf(s.id)+'" data-open="'+esc(s.id)+'" title="'+esc(s.job_title)+' \u2014 '+esc(s.engineer)+'">'+esc(s.job_title)+'</div>';
+      });
+      if(jobs.length>3) chips+='<div class="calmore">+'+(jobs.length-3)+' more</div>';
+      html+='<div class="calcell'+(inMonth?"":" dim")+(k===todayKey?" today":"")+'">'+
+        '<div class="caldate">'+date.getDate()+'</div>'+chips+'</div>';
+    }
+    html+='</div>';
+    view.innerHTML=html;
+
+    Array.prototype.forEach.call(view.querySelectorAll(".calnav, .caltoday"), function(b){
+      b.onclick=function(){
+        var a=b.getAttribute("data-cal");
+        if(a==="prev") calMonth=new Date(year,month-1,1);
+        else if(a==="next") calMonth=new Date(year,month+1,1);
+        else calMonth=new Date(now.getFullYear(), now.getMonth(), 1);
+        renderCalendar();
+      };
+    });
+    Array.prototype.forEach.call(view.querySelectorAll(".calchip"), function(c){
+      c.onclick=function(){ openDetail(c.getAttribute("data-open")); };
+    });
+  }
+
+  // jobs due within 3 days (incl today/overdue) and not yet actioned
+  function notifItems(){
+    return shifts.filter(function(s){
+      if(isHidden(s.id)) return false;
+      if(statusOf(s.id)==="actioned") return false;
+      var n=dayDiff(s.start);
+      return n!==null && n<=3;
+    }).sort(function(a,b){ return (dayDiff(a.start))-(dayDiff(b.start)); });
+  }
+
+  function notifCardHtml(s){
+    var st=statusOf(s.id), n=dayDiff(s.start);
+    var cls=n<0?"overdue":(n===0?"today":"");
+    var meta="";
+    if(s.start) meta+='<span class="m">'+ICON.clock+esc(fmtTime(s.start))+'</span>';
+    if(s.location) meta+='<span class="m">'+ICON.pin+esc(s.location)+'</span>';
+    function seg(v,label){ return '<button data-id="'+esc(s.id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+label+'</button>'; }
+    return '<div class="card s-'+st+'" data-id="'+esc(s.id)+'">'+
+      '<button class="carddel" data-del="'+esc(s.id)+'" title="Remove from board">\u00d7</button>'+
+      '<div class="card-body" data-open="'+esc(s.id)+'">'+
+        '<span class="daychip '+cls+'">'+dayLabel(n)+'</span>'+
+        '<div class="cardeng">'+esc(s.engineer)+'</div>'+
+        '<div class="title">'+esc(s.job_title)+'</div>'+
+        (meta?'<div class="meta">'+meta+'</div>':'')+
+      '</div>'+
+      '<div class="seg">'+seg("pending","Pending")+seg("actioned","Actioned")+seg("urgent","Urgent")+'</div>'+
+      '</div>';
+  }
+
+  /* ---------- orders / invoices ---------- */
+  var ORDER_ITEMS=[
+    ["Fully Loaded CU",23.50],["Fully Loaded IP65 CU",23.50],["Tails Glands",1.49],["Stuffers",1.05],
+    ["Henly Blocks",2.78],["Wiska Boxes",5.99],["Kopex (5m Pack)",7.99],["Drill Caps",0.25],
+    ["MET bars",1.49],["Earth Clamps",1.55],["Screws and Plugs",7.98],["MT4 Trunking (By length)",5.55],
+    ["Concrete",7.98],["2inch Screws",3.89],["5.5X SDS",1.00],["Flatwood bits",1.70],["Marksman",3.89],
+    ["D Line Clips",8.40],["Clear Silicone",2.69],["White Silicone",2.69],["Wipes box",7.31],
+    ["Cleats packs",3.50],["MT4 Trunking Bends",0.89],["MT2 Trunking Bends",0.49],["Cableties pack",1.98],
+    ["Tarmac",12.50],["Catenary Wire",14.78],["Kem Fix",10.55],["6mm T&E (Per Meter)",1.75],
+    ["CAT5e (Per Meter)",0.31],["MT2 Trunking (By length)",3.45],["25mm Fire Rated Grommits",0.48],
+    ["32mm Fire Rated Grommits",0.54]
+  ];
+  var WHOLESALERS=["CEF","TED","TanSales"];
+  var VATRATE=0.2;
+  var invoices=[];
+  var orderView="new";
+
+  function money(n){ return "\u00a3"+(Number(n)||0).toFixed(2); }
+  async function saveInvoices(){ await sSet("invoices", invoices); }
+
+  function trailingNum(s){ var m=String(s||"").match(/(\d+)\s*$/); return m?parseInt(m[1],10):null; }
+  function nextNumber(w){
+    var best=null,bestN=-Infinity;
+    invoices.forEach(function(v){ if(v.wholesaler!==w) return; var n=trailingNum(v.number); if(n!==null&&n>bestN){bestN=n;best=v.number;} });
+    if(best===null) return "";
+    var m=String(best).match(/^(.*?)(\d+)(\D*)$/); if(!m) return "";
+    var width=m[2].length, inc=(parseInt(m[2],10)+1).toString();
+    while(inc.length<width) inc="0"+inc;
+    return m[1]+inc+m[3];
+  }
+  function invoiceGaps(w){
+    var nums=invoices.filter(function(v){return v.wholesaler===w;}).map(function(v){return trailingNum(v.number);}).filter(function(n){return n!==null;}).sort(function(a,b){return a-b;});
+    var gaps=[];
+    for(var i=1;i<nums.length;i++){ for(var n=nums[i-1]+1;n<nums[i];n++){ gaps.push(n); if(gaps.length>40){ gaps.push("\u2026"); return gaps; } } }
+    return gaps;
+  }
+  function invTotal(v){ var t=0; (v.lines||[]).forEach(function(l){ t+=(Number(l.qty)||0)*(Number(l.price)||0); }); return t; }
+  function invShort(v){ // lines where delivered < qty (ordered)
+    return (v.lines||[]).filter(function(l){ return l.delivered!=="" && l.delivered!=null && Number(l.delivered)<Number(l.qty); });
+  }
+  function invFlagged(v){ return !v.resolved && (v.source==="wholesaler" || invShort(v).length>0 || v.flagged); }
+
+  function renderOrders(){
+    var root=el("ordersview");
+    root.innerHTML=
+      '<div class="subtabs">'+
+      '<button class="subtab'+(orderView==="new"?" on":"")+'" data-ov="new">New order</button>'+
+      '<button class="subtab'+(orderView==="register"?" on":"")+'" data-ov="register">Invoices</button>'+
+      '<button class="subtab'+(orderView==="action"?" on":"")+'" data-ov="action">To be actioned</button>'+
+      '</div><div id="oBody"></div>';
+    Array.prototype.forEach.call(root.querySelectorAll(".subtab"), function(b){
+      b.onclick=function(){ orderView=b.getAttribute("data-ov"); renderOrders(); };
+    });
+    if(orderView==="new") renderNewOrder();
+    else if(orderView==="register") renderRegister();
+    else renderActionList();
+  }
+
+  function renderNewOrder(){
+    var body=el("oBody");
+    var wsel=WHOLESALERS.map(function(w){return '<option>'+w+'</option>';}).join("");
+    var rows=ORDER_ITEMS.map(function(it,i){
+      return '<tr><td class="oitemname">'+esc(it[0])+'</td>'+
+        '<td class="num"><input data-p="'+i+'" type="number" step="0.01" value="'+it[1].toFixed(2)+'"></td>'+
+        '<td class="num"><input data-q="'+i+'" type="number" min="0" step="1" placeholder="0"></td>'+
+        '<td class="num" data-lt="'+i+'">\u00a30.00</td></tr>';
+    }).join("");
+    body.innerHTML=
+      '<div class="opanel">'+
+        '<div class="orow">'+
+          '<div class="ofield"><label>Wholesaler</label><select id="oWhole">'+wsel+'</select></div>'+
+          '<div class="ofield"><label>Invoice / order no.</label><input id="oNum" placeholder="e.g. 10432"></div>'+
+          '<div class="ofield"><label>Date</label><input id="oDate" type="date"></div>'+
+        '</div>'+
+        '<table class="otable"><thead><tr><th>Item</th><th class="num">Unit price</th><th class="num">Qty</th><th class="num">Line total</th></tr></thead>'+
+        '<tbody id="oItems">'+rows+'</tbody>'+
+        '<tbody id="oSpecial"></tbody></table>'+
+        '<button class="addrow" id="oAddSpecial">+ Add special item</button>'+
+        '<div class="ototals">'+
+          '<div class="row"><span>Subtotal</span><span id="oSub">\u00a30.00</span></div>'+
+          '<div class="row"><span>VAT (20%)</span><span id="oVat">\u00a30.00</span></div>'+
+          '<div class="row grand"><span>Total</span><span id="oTot">\u00a30.00</span></div>'+
+        '</div>'+
+        '<div class="obtns">'+
+          '<button class="primary" id="oSaveBtn">Save invoice</button>'+
+          '<button class="ghost" id="oPrintBtn">Print / PDF</button>'+
+          '<button class="ghost" id="oClearBtn">Clear</button>'+
+        '</div>'+
+        '<div id="oMsg" class="omsg"></div>'+
+      '</div>';
+
+    el("oDate").value=new Date().toISOString().slice(0,10);
+    var wsElem=el("oWhole");
+    function refreshNum(){ el("oNum").value=nextNumber(wsElem.value); }
+    wsElem.onchange=refreshNum; refreshNum();
+
+    body.addEventListener("input", recalcOrder);
+    el("oAddSpecial").onclick=function(){
+      var tb=el("oSpecial");
+      var tr=document.createElement("tr"); tr.className="ospecial";
+      tr.innerHTML='<td><input class="name" placeholder="Special item"></td>'+
+        '<td class="num"><input class="sp-p" type="number" step="0.01" placeholder="0.00"></td>'+
+        '<td class="num"><input class="sp-q" type="number" min="0" step="1" placeholder="0"></td>'+
+        '<td class="num"><span class="sp-lt">\u00a30.00</span> <button class="delrow" title="Remove">\u00d7</button></td>';
+      tb.appendChild(tr);
+      tr.querySelector(".delrow").onclick=function(){ tr.remove(); recalcOrder(); };
+    };
+    el("oSaveBtn").onclick=saveOrder;
+    el("oPrintBtn").onclick=function(){ printInvoice(readOrder()); };
+    el("oClearBtn").onclick=function(){ orderView="new"; renderOrders(); };
+    recalcOrder();
+  }
+
+  function recalcOrder(){
+    var sub=0;
+    ORDER_ITEMS.forEach(function(it,i){
+      var p=parseFloat((el("oBody").querySelector('[data-p="'+i+'"]')||{}).value)||0;
+      var q=parseFloat((el("oBody").querySelector('[data-q="'+i+'"]')||{}).value)||0;
+      var lt=p*q; sub+=lt;
+      var cell=el("oBody").querySelector('[data-lt="'+i+'"]'); if(cell) cell.textContent=money(lt);
+    });
+    Array.prototype.forEach.call(el("oBody").querySelectorAll("#oSpecial tr"), function(tr){
+      var p=parseFloat(tr.querySelector(".sp-p").value)||0, q=parseFloat(tr.querySelector(".sp-q").value)||0;
+      var lt=p*q; sub+=lt; tr.querySelector(".sp-lt").textContent=money(lt);
+    });
+    var vat=sub*VATRATE;
+    if(el("oSub")) el("oSub").textContent=money(sub);
+    if(el("oVat")) el("oVat").textContent=money(vat);
+    if(el("oTot")) el("oTot").textContent=money(sub+vat);
+  }
+
+  function readOrder(){
+    var lines=[];
+    ORDER_ITEMS.forEach(function(it,i){
+      var p=parseFloat((el("oBody").querySelector('[data-p="'+i+'"]')||{}).value)||0;
+      var q=parseFloat((el("oBody").querySelector('[data-q="'+i+'"]')||{}).value)||0;
+      if(q>0) lines.push({ name:it[0], price:p, qty:q, delivered:"" });
+    });
+    Array.prototype.forEach.call(el("oBody").querySelectorAll("#oSpecial tr"), function(tr){
+      var name=tr.querySelector(".name").value.trim();
+      var p=parseFloat(tr.querySelector(".sp-p").value)||0, q=parseFloat(tr.querySelector(".sp-q").value)||0;
+      if(name && q>0) lines.push({ name:name, price:p, qty:q, delivered:"", special:true });
+    });
+    return {
+      wholesaler: el("oWhole").value,
+      number: el("oNum").value.trim(),
+      date: el("oDate").value,
+      lines: lines
+    };
+  }
+
+  async function saveOrder(){
+    var o=readOrder();
+    var msg=el("oMsg");
+    function bad(t){ if(msg){ msg.textContent=t; msg.className="omsg bad"; } }
+    if(!o.number){ bad("Enter an invoice / order number first."); var nn=el("oNum"); if(nn) nn.focus(); return; }
+    if(!o.lines.length){ bad("Add a quantity to at least one item (or a special item) before saving."); return; }
+    o.id="inv_"+Date.now();
+    o.source="us";
+    o.status="sent"; o.received=false; o.audited=false; o.resolved=false; o.flagged=false; o.note="";
+    invoices.push(o);
+    await saveInvoices();
+    orderView="register"; renderOrders();
+  }
+
+  function renderRegister(){
+    var body=el("oBody");
+    var top='<div class="uploadbar">'+
+      '<button class="primary" id="oUploadBtn">Upload their invoices</button>'+
+      '<span id="oChooser" style="display:none;align-items:center;gap:6px">'+
+        '<span style="font-size:12.5px;color:var(--muted)">Which wholesaler?</span>'+
+        WHOLESALERS.map(function(w){return '<button class="ghost" data-uw="'+esc(w)+'" style="padding:6px 12px">'+esc(w)+'</button>';}).join("")+
+        '<button class="ghost" id="oChooseCancel" style="padding:6px 10px">Cancel</button>'+
+      '</span>'+
+      '<input id="oUploadInput" type="file" multiple accept="application/pdf,image/*" style="display:none">'+
+      '<span class="umsg">'+esc(uploadMsg||"Match wholesaler invoices to your orders by number.")+'</span></div>';
+    if(unmatched.length){
+      var opts='<option value="">Assign to our order\u2026</option>'+invoices.filter(function(v){return v.source!=="wholesaler";}).map(function(v){return '<option value="'+esc(v.id)+'">'+esc(v.wholesaler)+" "+esc(v.number)+'</option>';}).join("");
+      var wopts=WHOLESALERS.map(function(w){return '<option>'+w+'</option>';}).join("");
+      top+='<div class="unmatched"><div class="uhead">Unmatched files ('+unmatched.length+') \u2014 assign to an order, or record as the wholesaler\u2019s invoice (no order our side)</div>'+
+        unmatched.map(function(u){
+          var wsel=WHOLESALERS.map(function(w){return '<option'+(w===u.wholesaler?" selected":"")+'>'+w+'</option>';}).join("");
+          return '<div class="urow"><span class="uname">'+esc(u.name)+(u.wholesaler?' <span style="color:var(--faint)">('+esc(u.wholesaler)+')</span>':'')+'</span>'+
+            '<span class="ulink" data-view="'+u.uid+'">view</span>'+
+            '<select data-assign="'+u.uid+'">'+opts+'</select>'+
+            '<span style="color:var(--faint);font-size:12px">or</span>'+
+            '<input data-num="'+u.uid+'" placeholder="their inv no" style="width:104px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:12.5px;background:var(--panel);color:var(--ink)">'+
+            '<select data-nw="'+u.uid+'">'+wsel+'</select>'+
+            '<button class="addrow" data-theirs="'+u.uid+'" style="margin-top:0">Save as their invoice</button>'+
+            '</div>';
+        }).join("")+'</div>';
+    }
+    if(!invoices.length){ body.innerHTML=top+'<div class="oempty"><b>No invoices yet.</b><br>Create one under \u201cNew order\u201d and it\u2019ll appear here to audit.</div>'; wireUpload(); return; }
+    var html=top;
+    WHOLESALERS.forEach(function(w){
+      var list=invoices.filter(function(v){return v.wholesaler===w;}).sort(function(a,b){ return (trailingNum(a.number)||0)-(trailingNum(b.number)||0); });
+      if(!list.length) return;
+      html+='<div class="wholehead">'+esc(w)+' <span style="color:var(--faint);font-weight:600">('+list.length+')</span></div>';
+      var gaps=invoiceGaps(w);
+      if(gaps.length) html+='<div class="gapbar">Missing numbers to chase: <b>'+gaps.join(", ")+'</b></div>';
+      html+='<div class="invlist">'+list.map(function(v){
+        var flagged=invFlagged(v);
+        var noOrder=v.source==="wholesaler";
+        var stcls=flagged?"st-flagged":(v.audited?"st-audited":(v.received?"st-received":""));
+        var pill=noOrder?'<span class="invpill flagged">No order \u2014 theirs</span>':(flagged?'<span class="invpill flagged">To action</span>':(v.audited?'<span class="invpill audited">Audited</span>':(v.received?'<span class="invpill">Received</span>':'<span class="invpill">Sent</span>')));
+        var meta=noOrder?('their invoice \u00b7 no order our side'):(esc(v.date||"")+' \u00b7 '+money(invTotal(v))+' \u00b7 '+(v.lines?v.lines.length:0)+' items');
+        return '<div class="invrow '+stcls+'" data-inv="'+esc(v.id)+'">'+
+          '<span class="invnum">'+esc(v.number)+(v.att?'<span class="clip" title="Their invoice attached">\u2009\ud83d\udcce</span>':'')+'</span>'+
+          '<span class="invmeta">'+meta+'</span>'+
+          pill+'</div>';
+      }).join("")+'</div>';
+    });
+    body.innerHTML=html;
+    wireUpload();
+    Array.prototype.forEach.call(body.querySelectorAll(".invrow"), function(r){
+      r.onclick=function(){ openInvoiceDetail(r.getAttribute("data-inv")); };
+    });
+  }
+  function wireUpload(){
+    var btn=el("oUploadBtn"), inp=el("oUploadInput"), chooser=el("oChooser");
+    if(btn&&chooser) btn.onclick=function(){ btn.style.display="none"; chooser.style.display="inline-flex"; };
+    var cancel=el("oChooseCancel"); if(cancel&&chooser&&btn) cancel.onclick=function(){ chooser.style.display="none"; btn.style.display="inline-flex"; };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-uw]"), function(b){
+      b.onclick=function(){ uploadWholesaler=b.getAttribute("data-uw"); if(chooser)chooser.style.display="none"; if(btn)btn.style.display="inline-flex"; if(inp) inp.click(); };
+    });
+    if(inp) inp.onchange=function(){
+      if(inp.files&&inp.files.length){
+        var um=document.querySelector(".umsg"); if(um) um.textContent="Reading "+uploadWholesaler+" files\u2026";
+        handleUpload(inp.files, uploadWholesaler);
+      }
+    };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-assign]"), function(s){
+      s.onchange=function(){ if(s.value) assignUnmatched(s.getAttribute("data-assign"), s.value); };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-view]"), function(l){
+      l.onclick=function(){ var uid=l.getAttribute("data-view"); var u=null; for(var i=0;i<unmatched.length;i++){if(unmatched[i].uid===uid){u=unmatched[i];break;}} if(u) openData(u.data,u.type); };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-theirs]"), function(b){
+      b.onclick=function(){
+        var uid=b.getAttribute("data-theirs");
+        var num=(document.querySelector('[data-num="'+uid+'"]')||{}).value;
+        var wh=(document.querySelector('[data-nw="'+uid+'"]')||{}).value;
+        if(!num||!String(num).trim()){ uploadMsg="Enter their invoice number to record it."; renderOrders(); return; }
+        recordWholesalerInvoice(uid, String(num).trim(), wh);
+      };
+    });
+  }
+
+  function renderActionList(){
+    var body=el("oBody");
+    var list=invoices.filter(invFlagged);
+    if(!list.length){ body.innerHTML='<div class="oempty"><b>Nothing to action.</b><br>Short deliveries or flagged invoices show here until you mark them resolved (e.g. credit note received).</div>'; return; }
+    body.innerHTML='<div class="invlist">'+list.map(function(v){
+      var shorts=invShort(v).map(function(l){ return l.name+" (short "+(Number(l.qty)-Number(l.delivered))+")"; });
+      var reason = shorts.length? shorts.join(", ") : (v.note||"Flagged");
+      return '<div class="invrow st-flagged" data-inv="'+esc(v.id)+'">'+
+        '<span class="invnum">'+esc(v.number)+'</span>'+
+        '<span class="invwhole">'+esc(v.wholesaler)+'</span>'+
+        '<span class="invmeta">'+esc(reason)+'</span>'+
+        '<span class="invpill flagged">To action</span></div>';
+    }).join("")+'</div>';
+    Array.prototype.forEach.call(body.querySelectorAll(".invrow"), function(r){
+      r.onclick=function(){ openInvoiceDetail(r.getAttribute("data-inv")); };
+    });
+  }
+
+  function findInvoice(id){ for(var i=0;i<invoices.length;i++){ if(invoices[i].id===id) return invoices[i]; } return null; }
+
+  /* ---------- attach wholesaler invoices ---------- */
+  var unmatched=[];   // [{uid,name,type,data,wholesaler}] persisted under "unmatched"
+  var uploadMsg="";
+  var uploadWholesaler="";
+  function escRe(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }
+  function readAsDataURL(file){
+    return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result);}; r.onerror=function(){rej(r.error);}; r.readAsDataURL(file); });
+  }
+  async function pdfText(file){
+    if(!window.pdfjsLib) return "";
+    try{
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      var buf=await file.arrayBuffer();
+      var pdf=await window.pdfjsLib.getDocument({data:buf}).promise;
+      var text="";
+      for(var p=1;p<=pdf.numPages;p++){ var pg=await pdf.getPage(p); var c=await pg.getTextContent(); text+=" "+c.items.map(function(it){return it.str;}).join(" "); }
+      return text;
+    }catch(e){ return ""; }
+  }
+  function matchInvoice(hay, wholesaler){
+    var cands=invoices.filter(function(v){
+      if(!v.number) return false;
+      if(wholesaler && v.wholesaler!==wholesaler) return false;
+      return new RegExp("(?:^|\\D)"+escRe(v.number)+"(?:\\D|$)").test(hay);
+    });
+    return cands[0]||null;
+  }
+  async function attachTo(inv, name, type, data){
+    inv.att={ name:name, type:type };
+    try{ await sSet("att:"+inv.id, { name:name, type:type, data:data }); }
+    catch(e){ uploadMsg="Storage full \u2014 couldn't save "+name+". This laptop's local storage is at its limit."; }
+    await saveInvoices();
+  }
+  async function handleUpload(fileList, wholesaler){
+    var matched=0, un=0;
+    for(var i=0;i<fileList.length;i++){
+      var file=fileList[i];
+      var data=await readAsDataURL(file);
+      var text=(file.type==="application/pdf") ? await pdfText(file) : "";
+      var inv=matchInvoice(file.name+" "+text, wholesaler);
+      if(inv){ await attachTo(inv, file.name, file.type, data); matched++; }
+      else { unmatched.push({ uid:"u"+Date.now()+i, name:file.name, type:file.type, data:data, wholesaler:wholesaler }); un++; }
+    }
+    try{ await sSet("unmatched", unmatched); }catch(e){}
+    uploadMsg=wholesaler+": matched "+matched+", unmatched "+un+"."+(uploadMsg&&/full/.test(uploadMsg)?" "+uploadMsg:"");
+    renderOrders();
+  }
+  async function assignUnmatched(uid, invId){
+    var u=null; for(var i=0;i<unmatched.length;i++){ if(unmatched[i].uid===uid){ u=unmatched[i]; break; } }
+    var inv=findInvoice(invId); if(!u||!inv) return;
+    await attachTo(inv, u.name, u.type, u.data);
+    unmatched=unmatched.filter(function(x){return x.uid!==uid;});
+    try{ await sSet("unmatched", unmatched); }catch(e){}
+    renderOrders();
+  }
+  async function recordWholesalerInvoice(uid, number, wholesaler){
+    var u=null; for(var i=0;i<unmatched.length;i++){ if(unmatched[i].uid===uid){ u=unmatched[i]; break; } }
+    var inv={ id:"inv_"+Date.now(), source:"wholesaler", wholesaler:wholesaler, number:number, date:"",
+              lines:[], status:"received", received:true, audited:false, resolved:false, flagged:false, note:"" };
+    invoices.push(inv);
+    if(u){ await attachTo(inv, u.name, u.type, u.data); unmatched=unmatched.filter(function(x){return x.uid!==uid;}); try{ await sSet("unmatched", unmatched); }catch(e){} }
+    else { await saveInvoices(); }
+    uploadMsg="Recorded "+wholesaler+" "+number+" as their invoice (no order our side).";
+    renderOrders();
+  }
+  function openData(dataUrl, type){
+    try{
+      var arr=dataUrl.split(","), mime=(arr[0].match(/:(.*?);/)||[])[1]||type||"application/octet-stream";
+      var bstr=atob(arr[1]), n=bstr.length, u8=new Uint8Array(n); while(n--){ u8[n]=bstr.charCodeAt(n); }
+      var url=URL.createObjectURL(new Blob([u8],{type:mime})); window.open(url,"_blank");
+    }catch(e){ window.open(dataUrl,"_blank"); }
+  }
+  async function viewAttachment(invId){
+    var a=await sGet("att:"+invId); if(a&&a.data) openData(a.data, a.type);
+  }
+
+  function openInvoiceDetail(id){
+    var v=findInvoice(id); if(!v) return;
+    el("detailTitle").firstChild.textContent = v.wholesaler+" \u00b7 "+v.number+" ";
+    var rows=(v.lines||[]).map(function(l,i){
+      var short = l.delivered!=="" && l.delivered!=null && Number(l.delivered)<Number(l.qty);
+      return '<div class="drow"><span>'+esc(l.name)+'</span><div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;flex:1">'+
+        '<span style="color:var(--muted)">ord '+l.qty+'</span>'+
+        '<input class="ivd" data-i="'+i+'" type="number" min="0" placeholder="delivered" value="'+(l.delivered===undefined?"":l.delivered)+'" style="width:90px;border:1px solid '+(short?"var(--urgent)":"var(--line)")+';background:var(--surface);color:var(--ink);border-radius:6px;padding:5px 7px;text-align:right">'+
+        '</div></div>';
+    }).join("");
+    var html='';
+    if(v.source==="wholesaler"){
+      html+='<div class="gapbar" style="margin-bottom:12px">This is <b>'+esc(v.wholesaler)+"'s invoice "+esc(v.number)+'</b> \u2014 we have <b>no order</b> on our side for it. Query it, then tick Resolved.</div>';
+    }
+    html+='<div class="dstatus" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+
+        '<button class="seg-b" data-st="received">'+(v.received?"\u2713 ":"")+'Received</button>'+
+        '<button class="seg-b" data-st="audited">'+(v.audited?"\u2713 ":"")+'Audited</button>'+
+        '<button class="seg-b" data-st="resolved">'+(v.resolved?"\u2713 ":"")+'Resolved</button>'+
+      '</div>';
+    html+=drow("Wholesaler", v.wholesaler)+drow("Date", v.date)+drow("Total", money(invTotal(v)));
+    html+='<div class="dsec">Lines (enter delivered qty to flag a shortfall)</div>'+rows;
+    html+='<div class="blocker" style="display:block;margin-top:14px"><label style="font-size:12px;font-weight:600;color:var(--muted)">Note (query / credit chase)</label>'+
+      '<input id="ivNote" value="'+esc(v.note||"")+'" placeholder="e.g. short 50 CUs, credit requested" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;background:var(--surface);color:var(--ink);margin-top:6px"></div>';
+    html+='<button class="ghost" id="ivPrint" style="margin-top:14px;width:100%">Print / PDF our order</button>';
+    html+= v.att
+      ? '<button class="ghost" id="ivView" style="margin-top:8px;width:100%">View their invoice ('+esc(v.att.name)+')</button>'
+      : '<button class="ghost" id="ivAttach" style="margin-top:8px;width:100%">Attach their invoice</button>';
+    html+='<input id="ivFile" type="file" accept="application/pdf,image/*" style="display:none">';
+    html+='<button class="ghost danger" id="ivDel" style="margin-top:8px;width:100%">Delete invoice</button>';
+    el("detailBody").innerHTML=html;
+
+    // simple toggle buttons
+    var stStyle='.seg-b{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer}';
+    if(!document.getElementById("segbStyle")){ var s=document.createElement("style"); s.id="segbStyle"; s.textContent=stStyle; document.head.appendChild(s); }
+
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll(".seg-b"), function(b){
+      b.onclick=async function(){ var k=b.getAttribute("data-st"); v[k]=!v[k]; if(k==="received"&&v.received&&!v.date2){} await saveInvoices(); openInvoiceDetail(id); renderOrders(); renderTabs(); };
+    });
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll(".ivd"), function(inp){
+      inp.onchange=async function(){ var i=+inp.getAttribute("data-i"); v.lines[i].delivered=inp.value===""?"":Number(inp.value); await saveInvoices(); openInvoiceDetail(id); renderOrders(); };
+    });
+    el("ivNote").onchange=async function(){ v.note=el("ivNote").value; await saveInvoices(); };
+    el("ivPrint").onclick=function(){ printInvoice(v); };
+    var ivView=el("ivView"); if(ivView) ivView.onclick=function(){ viewAttachment(v.id); };
+    var ivAttach=el("ivAttach"), ivFile=el("ivFile");
+    if(ivAttach&&ivFile){
+      ivAttach.onclick=function(){ ivFile.click(); };
+      ivFile.onchange=async function(){
+        if(!ivFile.files||!ivFile.files.length) return;
+        var f=ivFile.files[0]; var data=await readAsDataURL(f);
+        await attachTo(v, f.name, f.type, data);
+        openInvoiceDetail(id); renderOrders();
+      };
+    }
+    el("ivDel").onclick=async function(){
+      var b=el("ivDel");
+      if(b.getAttribute("data-armed")!=="1"){ b.setAttribute("data-armed","1"); b.textContent="Click again to delete"; return; }
+      invoices=invoices.filter(function(x){return x.id!==v.id;}); await saveInvoices(); closeDetail(); renderOrders();
+    };
+    el("detail").classList.add("show");
+  }
+
+  function printInvoice(v){
+    var lines=(v.lines||[]).map(function(l){
+      return '<tr><td>'+esc(l.name)+'</td><td class="num">'+l.qty+'</td><td class="num">'+money(l.price)+'</td><td class="num">'+money(l.qty*l.price)+'</td></tr>';
+    }).join("");
+    var sub=invTotal(v), vat=sub*VATRATE;
+    el("printarea").innerHTML=
+      '<div class="inv-doc">'+
+      '<h1>Plug In Stations \u2014 Order</h1>'+
+      '<div class="muted">Wholesaler: '+esc(v.wholesaler||"")+' &nbsp;\u2022&nbsp; Invoice/Order no: '+esc(v.number||"")+' &nbsp;\u2022&nbsp; Date: '+esc(v.date||"")+'</div>'+
+      '<table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead><tbody>'+lines+'</tbody></table>'+
+      '<div class="tot">Subtotal: '+money(sub)+'<br>VAT (20%): '+money(vat)+'<br><span class="g">Total: '+money(sub+vat)+'</span></div>'+
+      '</div>';
+    window.print();
+  }
+
+  // engineers sometimes paste the whole job into the job field — show just name + postcode
+  function tidyJob(s){
+    s=String(s||"").replace(/\s+/g," ").trim();
+    if(!s) return "";
+    if(s.length<=42 && !/client:/i.test(s)) return s;   // already short/clean
+    var pc=(s.match(/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i)||[])[1];
+    var nm=(s.match(/client:\s*([^]+?)\s*(?:address:|number\s*\/?\s*email:|tel:|$)/i)||[])[1];
+    if(nm) nm=nm.replace(/\s+/g," ").trim();
+    if(nm && pc) return nm+" \u00b7 "+pc.toUpperCase();
+    if(pc) return pc.toUpperCase();
+    if(nm) return nm;
+    return s.slice(0,42)+"\u2026";
+  }
+  // a Flow run links to any error OR stock alert with the same charger serial
+  function itemsForSerial(serial){
+    var k=serial&&canon(serial), out=[];
+    if(!k) return out;
+    errors.concat(stock).forEach(function(e){ if(e.serial && canon(e.serial)===k) out.push(e); });
+    return out;
+  }
+  function matchingOpenIssue(f){
+    if(!f) return null;
+    var arr=itemsForSerial(f.serial);
+    for(var i=0;i<arr.length;i++){ if(!isHidden(arr[i].id) && statusOf(arr[i].id)!=="actioned") return arr[i]; }
+    return null;
+  }
+  function flowsForSerial(serial){
+    var k=serial&&canon(serial), out=[];
+    if(!k) return out;
+    flow.forEach(function(f){ if(f.serial && canon(f.serial)===k) out.push(f); });
+    return out;
+  }
+  // when a linked error/stock item is actioned or deleted, mark the flow run's charger as sorted
+  async function markFlowChargerSorted(serial){
+    var fs=flowsForSerial(serial); if(!fs.length) return;
+    fs.forEach(function(f){ statuses[f.id]=statuses[f.id]||{}; statuses[f.id].linkDone=true; });
+    await sSet("statuses", statuses);
+    if(cfg.apiUrl) fs.forEach(function(f){ apiPost({ action:"setstatus", type:"flow", match:JSON.stringify(flowMatch(f)), linkdone:"yes" }); });
+  }
+  // once the linked issue is sorted (resolved or deleted), the charger counts as removed
+  function flowRemoved(f){
+    var o=statuses[f.id]&&statuses[f.id].ovRemoved;
+    if(o==="yes"||o==="no") return o;                 // manual override wins
+    if(statuses[f.id] && statuses[f.id].linkDone) return "yes";
+    if(yn(f.s_removed)===true) return "yes";
+    if(matchingOpenIssue(f)) return "no";
+    return f.s_removed;
+  }
+  function flowCu(f){ var o=statuses[f.id]&&statuses[f.id].ovCu; return (o==="yes"||o==="no")?o:f.s_cu; }
+  function flowCable(f){ var o=statuses[f.id]&&statuses[f.id].ovCable; return (o==="yes"||o==="no")?o:f.s_cable; }
+  async function setFlowOverride(id, key, value){
+    var map={ov_removed:"ovRemoved", ov_cu:"ovCu", ov_cable:"ovCable"};
+    statuses[id]=statuses[id]||{}; statuses[id][map[key]]=value;
+    await sSet("statuses", statuses);
+    if(cfg.apiUrl){ var it=findItem(id); if(it){ var p={action:"setstatus",type:"flow",match:JSON.stringify(matchFor(it,id))}; p[key]=value; apiPost(p); } }
+    openFlowDetail(id); render();
+  }
+  /* ---------- tasks (shared to-do board) ---------- */
+  var TASK_STATES=["todo","working","blocked","done"];
+  var TASK_LABEL={todo:"To do",working:"Working on it",blocked:"Blocked",done:"Done"};
+  var TKMAP={
+    task_id:["task_id","id","taskid"],
+    title:["title","task","name","description"],
+    assignee:["assignee","for","owner","assigned"],
+    created_by:["created_by","from_user","by","createdby"],
+    priority:["priority","prio"],
+    details:["details","task_details","description","detail"],
+    updates:["updates","activity","log"],
+    parent_id:["parent_id","parent","parentid"],
+    parent_title:["parent_title","parenttitle","from_task"],
+    from:["from","from_person","assigned_by"],
+    due:["due","due_date","duedate","day"],
+    when:["when","created","date","time","timestamp"]
+  };
+  function normTask(raw){ var row=buildRow(raw); var o={}; Object.keys(TKMAP).forEach(function(f){ o[f]=pick(row,TKMAP[f]); }); o._raw=raw; return o; }
+  function toTasks(rows){
+    var out=[], byId={};
+    (rows||[]).forEach(function(raw){
+      var t=normTask(raw);
+      if(!t.title && !t.task_id) return;
+      t.id="tsk::"+(t.task_id || (t.title+"|"+t.when).replace(/\s+/g," ").slice(0,120));
+      if(byId[t.id]!==undefined){ out[byId[t.id]]=t; } else { byId[t.id]=out.length; out.push(t); }
+    });
+    return out;
+  }
+  function canonTaskStatus(v){
+    var c=canon(v);
+    if(c==="working"||c==="workingonit"||c==="inprogress"||c==="doing") return "working";
+    if(c==="blocked"||c==="stuck"||c==="needshelp"||c==="struggling") return "blocked";
+    if(c==="done"||c==="completed"||c==="complete") return "done";
+    return "todo";
+  }
+  function taskMatch(t){ return { task_id: t.task_id }; }
+  /* ---------- flow view ---------- */
+  function frow(label,val){ return val!==""&&val!=null ? '<div class="frow"><span class="fl">'+esc(label)+'</span><span class="fv">'+esc(val)+'</span></div>' : ''; }
+  function frowErr(label,val){ return '<div class="frow"><span class="fl">'+esc(label)+'</span><span class="fv err">'+esc(val)+'</span></div>'; }
+  function frowD(label,val){ var v=yn(val); var dot=v===true?'<span class="fdot ok">\u2713</span>':(v===false?'<span class="fdot bad">\u2717</span>':'<span class="fdot unk">\u2013</span>'); return '<div class="frow"><span class="fl">'+esc(label)+'</span><span class="fv">'+dot+'</span></div>'; }
+  function flowCardHtml(f){
+    var auto=flowStatus(f), man=statusOf(f.id);
+    var pill = man==="actioned" ? '<span class="fpill ok">Resolved</span>'
+             : (auto==="fail"?'<span class="fpill fail">Fail</span>':(auto==="check"?'<span class="fpill check">Check</span>':'<span class="fpill ok">OK</span>'));
+    var head='<div class="fhead"><span class="feng">'+esc(f.engineer||"\u2014")+'</span><span class="fwhen">'+esc(f.when?fmtTime(f.when):"")+'</span>'+pill+'</div>';
+    var c1='<div class="fstage"><div class="fstage-h">Connecteam</div>'+frow("Serial",f.serial)+frow("CU",f.cu)+frow("Cable",f.cable)+frow("Job",tidyJob(f.job))+'</div>';
+    var c2='<div class="fstage"><div class="fstage-h">Zapier</div>'+frowD("Charger found",f.z_matched)+frowD("Remove charger",f.z_remove)+frow("CU adjust",f.z_cu)+frow("Cable adjust",f.z_cable)+(f.z_error?frowErr("Error",f.z_error):"")+(f.q_error?frowErr("Qty error",f.q_error):"")+'</div>';
+    var c3='<div class="fstage"><div class="fstage-h">Sortly</div>'+frowD("Charger removed",flowRemoved(f))+frowD("CU updated",flowCu(f))+frowD("Cable updated",flowCable(f))+(f.s_error?frowErr("Error",f.s_error):"")+'</div>';
+    var arrow='<div class="farrow">\u2192</div>';
+    var blockedByErr=!!matchingOpenIssue(f);
+    function seg(v,label){
+      var dis=(v==="actioned"&&blockedByErr);
+      return '<button data-id="'+esc(f.id)+'" data-s="'+v+'"'+(dis?' disabled title="Resolve the matching charger error first"':'')+' class="'+(man===v?"on":"")+(dis?" segdis":"")+'">'+label+'</button>';
+    }
+    return '<div class="card flowcard s-'+man+' auto-'+auto+'" data-id="'+esc(f.id)+'">'+
+      '<button class="carddel" data-del="'+esc(f.id)+'" title="Dismiss">\u00d7</button>'+
+      '<div class="card-body" data-open="'+esc(f.id)+'">'+head+'<div class="fgrid">'+c1+arrow+c2+arrow+c3+'</div></div>'+
+      '<div class="seg">'+seg("pending","Open")+seg("actioned","Resolved")+seg("urgent","Urgent")+'</div>'+
+      '</div>';
+  }
+  function renderFlow(){
+    var view=el("flowview");
+    var vis=flow.filter(function(f){ return !isHidden(f.id); });
+    if(!vis.length){
+      var m;
+      if(!cfg.flowUrl && !cfg.apiUrl) m='<b>No automation-flow feed connected.</b><br>Add a \u201clog the run\u201d step to your Zap that writes one row per run (Connecteam \u2192 Zapier \u2192 Sortly), publish that tab as CSV, and paste it in Settings \u2192 Flow CSV link (or use the Live API URL).';
+      else if(flowState==="blocked") m='<b>Couldn\u2019t load the flow feed.</b><br>Use the Publish-to-web CSV link and run from an https host.';
+      else if(flowState==="notcsv") m='<b>That link isn\u2019t CSV.</b><br>Re-publish the flow log tab as CSV.';
+      else if(flowState==="ok"&&flowCount>0) m='<b>Connected, but no rows recognised.</b><br>Row 1 needs headers like <code>engineer</code>, <code>charger_serial</code>, <code>charger_found</code>, <code>sortly_removed</code>.';
+      else if(flowState==="ok") m='<b>Connected \u2014 no runs logged yet.</b><br>Each automation run your Zap logs will appear here as a Connecteam \u2192 Zapier \u2192 Sortly flow.';
+      else m='No automation runs to show yet.';
+      view.innerHTML='<div class="flowempty">'+m+'</div>';
+      return;
+    }
+    function rank(f){ if(statusOf(f.id)==="actioned") return 3; var a=flowStatus(f); return a==="fail"?0:(a==="check"?1:2); }
+    var sorted=vis.slice().sort(function(a,b){ var r=rank(a)-rank(b); if(r) return r; return (Date.parse(b.when)||0)-(Date.parse(a.when)||0); });
+    view.innerHTML=sorted.map(flowCardHtml).join("");
+    wireCards(view);
+  }
+  function openFlowDetail(id){
+    var f=null; for(var i=0;i<flow.length;i++){ if(flow[i].id===id){ f=flow[i]; break; } }
+    if(!f) return;
+    var man=statusOf(id), auto=flowStatus(f), blk=(statuses[id]&&statuses[id].blocker)||"";
+    el("detailTitle").firstChild.textContent=(f.engineer||"Automation run")+" ";
+    function seg(v,label){
+      var dis=(v==="actioned"&&matchingOpenIssue(f));
+      return '<button data-id="'+esc(id)+'" data-s="'+v+'"'+(dis?' disabled':'')+' class="'+(man===v?"on":"")+(dis?" segdis":"")+'">'+label+'</button>';
+    }
+    var oe=matchingOpenIssue(f);
+    var html=(oe?'<div class="gapbar" style="margin-bottom:10px">Locked: resolve the matching charger error for <b>'+esc(oe.serial||f.serial)+'</b> in the Errors tab before resolving this run.</div>':'');
+    html+='<div class="gapbar" style="margin-bottom:12px;background:'+(auto==="fail"?"var(--urgent-soft);color:var(--urgent);border-color:var(--urgent)":(auto==="check"?"var(--pending-soft);color:var(--pending);border-color:var(--pending)":"var(--actioned-soft);color:var(--actioned);border-color:var(--actioned)"))+'">Auto-check: <b>'+auto.toUpperCase()+'</b></div>';
+    html+='<div class="seg dstatus">'+seg("pending","Open")+seg("actioned","Resolved")+seg("urgent","Urgent")+'</div>';
+    html+='<div class="dsec">Connecteam</div>'+drow("Engineer",f.engineer)+drow("Charger serial",f.serial)+drow("CU",f.cu)+drow("Cable",f.cable)+drow("Job",tidyJob(f.job))+drow("When",f.when?fmtTime(f.when):"");
+    html+='<div class="dsec">Zapier</div>'+drow("Charger found",f.z_matched)+drow("Remove charger",f.z_remove)+drow("CU adjust",f.z_cu)+drow("Cable adjust",f.z_cable)+drow("Charger error",f.z_error)+drow("Qty error",f.q_error);
+    html+='<div class="dsec">Sortly</div>'+drow("Charger removed",flowRemoved(f))+drow("CU updated",flowCu(f))+drow("Cable updated",flowCable(f))+drow("Error",f.s_error);
+    function ovseg(key,label,cur){
+      function b(v,t){ return '<button class="ovbtn '+((cur||"")===v?"on":"")+'" data-ov="'+key+'" data-ovv="'+v+'">'+t+'</button>'; }
+      return '<div class="ovrow"><span>'+label+'</span><span class="ovseg">'+b("","Auto")+b("yes","\u2713 Yes")+b("no","\u2717 No")+'</span></div>';
+    }
+    html+='<div class="dsec">Manually set Sortly result</div>'+
+      ovseg("ov_removed","Charger removed",(statuses[id]&&statuses[id].ovRemoved)||"")+
+      ovseg("ov_cu","CU updated",(statuses[id]&&statuses[id].ovCu)||"")+
+      ovseg("ov_cable","Cable updated",(statuses[id]&&statuses[id].ovCable)||"");
+    var extra=""; if(f._raw){ Object.keys(f._raw).forEach(function(k){ var key=String(k).trim(), val=String(f._raw[k]||"").trim(); if(!val) return; var known=false; Object.keys(FMAP).forEach(function(fl){ if(synMatch(FMAP[fl],key)) known=true; }); if(known) return; extra+=drow(key,val); }); }
+    if(extra) html+='<div class="dsec">Other columns from the sheet</div>'+extra;
+    html+='<div class="blocker" style="display:block;margin-top:14px"><label style="font-size:12px;font-weight:600;color:var(--muted)">Note</label><input id="detailBlk" name="note" data-id="'+esc(id)+'" placeholder="e.g. queried, re-ran, credit" value="'+esc(blk)+'"></div>';
+    html+='<button class="ghost danger" id="detailDel" data-id="'+esc(id)+'" style="margin-top:16px;width:100%">Dismiss this run</button>';
+    el("detailBody").innerHTML=html;
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll(".seg button"), function(b){ b.onclick=function(){ setStatus(b.getAttribute("data-id"), b.getAttribute("data-s")); openFlowDetail(id); }; });
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll("[data-ov]"), function(b){ b.onclick=function(){ setFlowOverride(id, b.getAttribute("data-ov"), b.getAttribute("data-ovv")); }; });
+    var inp=el("detailBlk"); if(inp) inp.onchange=function(){ setBlocker(inp.getAttribute("data-id"), inp.value); };
+    var del=el("detailDel"); if(del) del.onclick=function(){ deleteCard(del.getAttribute("data-id")); };
+    el("detail").classList.add("show");
+  }
+
+  /* ---------- tasks board (by person) ---------- */
+  var PEOPLE=["Andre","Andy","Andreas"];
+  var PRIOS=["high","medium","low"];
+  var PRIO_LABEL={high:"High",medium:"Medium",low:"Low"};
+  function taskUpdates(t){ try{ var a=JSON.parse(t.updates||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
+  function taskPrio(t){ var p=canon(t.priority); return (p==="high"||p==="medium"||p==="low")?p:"medium"; }
+  function peopleOptions(sel){ return PEOPLE.map(function(p){ return '<option'+(canon(sel)===canon(p)?' selected':'')+'>'+p+'</option>'; }).join(""); }
+  function subTasksOf(id){ var pid=String(id).replace("tsk::",""); return tasks.filter(function(x){ return x.parent_id && canon(x.parent_id)===canon(pid); }); }
+
+  function taskCardHtml(t){
+    var st=statusOf(t.id), pr=taskPrio(t);
+    var nUp=taskUpdates(t).length;
+    var flag=nUp?'<span class="upflag">'+ICON.chat+' '+nUp+'</span>':'';
+    var sub= t.parent_id ? '<div class="subflag">'+ICON.alert+' Sub-task from: '+esc(t.parent_title||"a task")+(t.from?' \u00b7 '+esc(t.from):'')+'</div>' : '';
+    function sb(v){ return '<button class="tstbtn'+(st===v?" on "+v:"")+'" data-tst-card="'+v+'" data-id="'+esc(t.id)+'">'+TASK_LABEL[v]+'</button>'; }
+    return '<div class="card taskcard st-'+st+' pr-'+pr+'" data-id="'+esc(t.id)+'">'+
+      '<button class="carddel" data-del="'+esc(t.id)+'" title="Delete">\u00d7</button>'+
+      '<div class="card-body" data-open="'+esc(t.id)+'">'+
+        '<span class="priochip pr-'+pr+'">'+PRIO_LABEL[pr]+'</span>'+
+        '<div class="title">'+esc(t.title||"(untitled)")+'</div>'+
+        sub+flag+
+      '</div>'+
+      '<div class="tstseg">'+TASK_STATES.map(sb).join("")+'</div>'+
+      '</div>';
+  }
+
+  function renderTasks(){
+    var view=el("tasksview");
+    var addbar='<div class="taskadd"><button class="primary" id="tkAdd">+ Add task</button>'+
+      '<span class="youare">You are <select id="tkYou"><option value="">\u2014</option>'+peopleOptions(cfg.userName||"")+'</select></span></div>';
+    if(!cfg.apiUrl && !cfg.tasksUrl && !tasks.length){
+      view.innerHTML=addbar+'<div class="oempty" style="margin:20px"><b>Tasks aren\u2019t saving yet.</b><br>Add a tab named <b>Tasks</b> to your Google Sheet, and set the <b>Live API URL</b> in Settings. Then tasks are saved and shared between Andre, Andy and Andreas.</div>';
+      wireTaskAdd(); return;
+    }
+    var vis=tasks.filter(function(t){ return !isHidden(t.id); });
+    function prioRank(t){ var p=taskPrio(t); return p==="high"?0:(p==="medium"?1:2); }
+    function doneRank(t){ return statusOf(t.id)==="done"?1:0; }
+    var cols=PEOPLE.map(function(person){
+      var list=vis.filter(function(t){ return canon(t.assignee)===canon(person); })
+        .sort(function(a,b){ var d=doneRank(a)-doneRank(b); if(d) return d; return prioRank(a)-prioRank(b); });
+      var cards=list.map(taskCardHtml).join("")||'<div class="colempty">No tasks</div>';
+      return '<div class="col taskcol"><div class="colhead"><div class="avatar" style="background:'+colorFor(person)+'">'+esc(initials(person))+'</div><div class="colname">'+esc(person)+'</div><div class="colcount">'+list.length+'</div></div><div class="cards">'+cards+'</div></div>';
+    });
+    var others=vis.filter(function(t){ return PEOPLE.map(canon).indexOf(canon(t.assignee))===-1; });
+    if(others.length){ cols.push('<div class="col taskcol"><div class="colhead"><div class="colname">Unassigned</div><div class="colcount">'+others.length+'</div></div><div class="cards">'+others.map(taskCardHtml).join("")+'</div></div>'); }
+    view.innerHTML=addbar+'<div class="taskboard">'+cols.join("")+'</div>';
+    wireTaskAdd();
+    var you=el("tkYou"); if(you) you.onchange=async function(){ cfg.userName=you.value; await sSet("config",cfg); };
+    wireCards(view);
+    Array.prototype.forEach.call(view.querySelectorAll("[data-tst-card]"), function(b){ b.onclick=function(){ setStatus(b.getAttribute("data-id"), b.getAttribute("data-tst-card")); }; });
+  }
+  function wireTaskAdd(){ var btn=el("tkAdd"); if(btn) btn.onclick=openTaskCreate; }
+
+  function openTaskCreate(){
+    el("detailTitle").firstChild.textContent="New task ";
+    el("detailBody").innerHTML=
+      '<div class="tkform">'+
+      '<label>Title</label><input id="tcTitle" placeholder="Task title">'+
+      '<label>Details</label><textarea id="tcDetails" rows="4" placeholder="What needs doing\u2026"></textarea>'+
+      '<label>Assign to</label><select id="tcFor">'+peopleOptions(cfg.userName||"")+'</select>'+
+      '<label>Priority</label><select id="tcPrio"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select>'+
+      '<button class="primary" id="tcCreate" style="margin-top:14px;width:100%">Create task</button>'+
+      '<div id="tcMsg" class="omsg"></div></div>';
+    el("tcCreate").onclick=async function(){
+      var title=el("tcTitle").value.trim();
+      if(!title){ el("tcMsg").textContent="Enter a title."; el("tcMsg").className="omsg bad"; return; }
+      await addTask({ title:title, assignee:el("tcFor").value, priority:el("tcPrio").value, details:el("tcDetails").value.trim() });
+      closeDetail();
+    };
+    el("detail").classList.add("show"); var f=el("tcTitle"); if(f) f.focus();
+  }
+
+  function openTaskDetail(id){
+    var t=findItem(id); if(!t) return;
+    var st=statusOf(id), pr=taskPrio(t);
+    el("detailTitle").firstChild.textContent=(t.title||"Task")+" ";
+    function sb(v){ return '<button class="tstbtn'+(st===v?" on "+v:"")+'" data-tst="'+v+'">'+TASK_LABEL[v]+'</button>'; }
+    function pb(v){ return '<button class="priobtn pr-'+v+(pr===v?" on":"")+'" data-prio="'+v+'">'+PRIO_LABEL[v]+'</button>'; }
+    var html='<div class="tstseg dstatus">'+TASK_STATES.map(sb).join("")+'</div>';
+    html+='<div class="ovrow"><span>Priority</span><span class="ovseg">'+PRIOS.map(pb).join("")+'</span></div>';
+    html+=drow("Assigned to", t.assignee);
+    if(t.parent_id) html+='<div class="gapbar" style="margin:10px 0">Sub-task from <b>'+esc(t.parent_title||"a task")+'</b>'+(t.from?' (from '+esc(t.from)+')':'')+'</div>';
+    if(t.details) html+='<div class="dsec">Details</div><div class="tkdetails">'+esc(t.details)+'</div>';
+    var subs=subTasksOf(id);
+    if(subs.length){ html+='<div class="dsec">Sub-tasks</div><div class="uplist">'+subs.map(function(s){ return '<div class="upitem"><div class="upmeta">'+esc(s.assignee||"")+' \u00b7 '+esc(TASK_LABEL[statusOf(s.id)])+'</div><div>'+esc(s.title)+'</div></div>'; }).join("")+'</div>'; }
+    var ups=taskUpdates(t);
+    html+='<div class="dsec">Updates</div>';
+    html+= ups.length ? '<div class="uplist">'+ups.map(function(u){ return '<div class="upitem"><div class="upmeta">'+(u.by?esc(u.by)+" \u00b7 ":"")+esc(fmtTime(new Date(u.t).toISOString()))+'</div><div>'+esc(u.text)+'</div></div>'; }).join("")+'</div>' : '<div style="color:var(--muted);font-size:13px;margin-bottom:6px">No updates yet.</div>';
+    html+='<div class="blocker" style="display:block;margin-top:6px"><input id="tuInput" placeholder="Add an update\u2026"></div><button class="ghost" id="tuAdd" style="margin-top:8px;width:100%">Add update</button>';
+    html+='<div class="dsec">New sub-task</div><div class="tkform"><input id="stTitle" placeholder="Sub-task title"><label style="margin-top:8px">Assign to</label><select id="stFor">'+peopleOptions("")+'</select><button class="ghost" id="stAdd" style="margin-top:10px;width:100%">Create sub-task</button></div>';
+    html+='<button class="ghost danger" id="tuDel" data-id="'+esc(id)+'" style="margin-top:14px;width:100%">Delete task</button>';
+    el("detailBody").innerHTML=html;
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll("[data-tst]"), function(b){ b.onclick=function(){ setStatus(id, b.getAttribute("data-tst")); openTaskDetail(id); }; });
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll("[data-prio]"), function(b){ b.onclick=function(){ setTaskPriority(id, b.getAttribute("data-prio")); openTaskDetail(id); }; });
+    el("tuAdd").onclick=async function(){ var v=el("tuInput").value.trim(); if(!v) return; await addTaskUpdate(id, v); openTaskDetail(id); };
+    var tin=el("tuInput"); if(tin) tin.onkeydown=function(e){ if(e.key==="Enter") el("tuAdd").onclick(); };
+    el("stAdd").onclick=async function(){ var v=el("stTitle").value.trim(); if(!v) return; await addTask({ title:v, assignee:el("stFor").value, priority:"medium", parent_id:t.task_id, parent_title:t.title, from:cfg.userName||t.assignee||"" }); openTaskDetail(id); };
+    el("tuDel").onclick=function(){ deleteCard(id); };
+    el("detail").classList.add("show");
+  }
+
+  async function addTask(o){
+    if(!o.title) return;
+    if(!cfg.apiUrl){ showError("Adding tasks needs the Live API URL (Settings)."); return; }
+    var id="task_"+Date.now()+Math.floor(Math.random()*100);
+    var when=new Date().toISOString();
+    var raw={ task_id:id, title:o.title, assignee:o.assignee||"", created_by:cfg.userName||"", status:"todo", priority:o.priority||"medium", details:o.details||"", updates:"[]", parent_id:o.parent_id||"", parent_title:o.parent_title||"", from:o.from||"", when:when };
+    var t={ task_id:id, title:o.title, assignee:o.assignee||"", created_by:cfg.userName||"", status:"todo", priority:o.priority||"medium", details:o.details||"", updates:"[]", parent_id:o.parent_id||"", parent_title:o.parent_title||"", from:o.from||"", when:when, _raw:raw, id:"tsk::"+id };
+    tasks.push(t); statuses[t.id]={ status:"todo" };
+    render();
+    apiPost({ action:"addtask", task_id:id, title:o.title, assignee:o.assignee||"", created_by:cfg.userName||"", status:"todo", priority:o.priority||"medium", details:o.details||"", parent_id:o.parent_id||"", parent_title:o.parent_title||"", from:o.from||"", when:when });
+  }
+  async function addTaskUpdate(id, text){
+    var t=findItem(id); if(!t) return;
+    var ups=taskUpdates(t); ups.push({ t:Date.now(), by:cfg.userName||"", text:text });
+    var json=JSON.stringify(ups);
+    t.updates=json; if(t._raw) t._raw.updates=json;
+    if(cfg.apiUrl) apiPost({ action:"setstatus", type:"task", match:JSON.stringify(taskMatch(t)), updates:json });
+    render();
+  }
+  async function setTaskPriority(id, val){
+    var t=findItem(id); if(t){ t.priority=val; if(t._raw) t._raw.priority=val; }
+    if(cfg.apiUrl){ var it=findItem(id); if(it) apiPost({ action:"setstatus", type:"task", match:JSON.stringify(taskMatch(it)), priority:val }); }
+    render();
+  }
+
+  /* ---------- stock alerts view ---------- */
+  var STK_LABEL = { pending:"Open", actioned:"Resolved", urgent:"Wrong charger type" };
+  function cardImage(item){
+    var url=findImageUrl(item);
+    if(!url || !/^https?:\/\//i.test(url)) return "";
+    var src=driveDirect(url).replace(/^http:\/\//i,"https://");
+    return '<img class="cardimg" src="'+esc(src)+'" alt="attached image" referrerpolicy="no-referrer">';
+  }
+  function stockNotFound(s){
+    if(!stripUrls(s.serial)) return true;   // Zap found no serial = charger not matched
+    var hay=((s.message||"")+" "+(s._raw?Object.keys(s._raw).map(function(k){return s._raw[k];}).join(" "):"")).toLowerCase();
+    return /serial number wrong|possible usage of our stock|charger not found|no serial/.test(hay);
+  }
+  function stockCardHtml(s){
+    var st=statusOf(s.id), blk=(statuses[s.id]&&statuses[s.id].blocker)||"";
+    var meta="";
+    if(s.when) meta+='<span class="m">'+ICON.clock+esc(fmtTime(s.when))+'</span>';
+    if(s.serial) meta+='<span class="m">SN: '+esc(stripUrls(s.serial))+'</span>';
+    if(s.item) meta+='<span class="m">'+ICON.box+esc(s.item)+(s.qty?" \u00d7"+esc(s.qty):"")+'</span>';
+    if(s.job) meta+='<span class="m">'+ICON.pin+esc(s.job)+'</span>';
+    var msg=s.message?'<div class="cardnote">'+esc(s.message)+'</div>':'';
+    var nf=stockNotFound(s);
+    var img=nf?cardImage(s):"";   // photo only matters when the charger errored
+    var ctype=(statuses[s.id]&&statuses[s.id].ctype)||"";
+    var typechip=(st==="urgent"&&ctype)?'<span class="typechip">'+esc(ctype)+'</span>':'';
+    var title=s.engineer||s.item||"Stock alert";
+    function seg(v,label){ return '<button data-id="'+esc(s.id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+label+'</button>'; }
+    return '<div class="card stockcard'+(nf?" nf":"")+' s-'+st+'" data-id="'+esc(s.id)+'">'+
+      '<button class="carddel" data-del="'+esc(s.id)+'" title="Dismiss">\u00d7</button>'+
+      '<div class="card-body" data-open="'+esc(s.id)+'">'+
+        '<div class="title"><span class="stockdot">'+ICON.box+'</span><span>'+esc(title)+'</span></div>'+
+        (nf?'<div class="nfchip">'+ICON.alert+' Charger not found</div>':'')+typechip+
+        (meta?'<div class="meta">'+meta+'</div>':'')+msg+img+
+      '</div>'+
+      '<div class="seg">'+seg("pending","Open")+seg("actioned","Resolved")+seg("urgent","Wrong charger type")+'</div>'+
+      '<div class="blocker"><input name="note" data-id="'+esc(s.id)+'" placeholder="Note (shown on urgent)" value="'+esc(blk)+'" /></div>'+
+      '</div>';
+  }
+  function renderStock(){
+    var view=el("stockview");
+    var vis=stock.filter(function(s){ return !isHidden(s.id); });
+    if(!vis.length){
+      var m;
+      if(!cfg.stockUrl && !cfg.apiUrl) m='<b>No stock-alerts feed connected.</b><br>Publish the \u201cPlugin Stock Alerts\u201d tab as CSV and paste it in Settings \u2192 Stock Alerts CSV link (or use the Live API URL).';
+      else if(stockState==="blocked") m='<b>Couldn\u2019t load the stock feed.</b><br>Use the Publish-to-web CSV link and run from an https host.';
+      else if(stockState==="notcsv") m='<b>That link isn\u2019t CSV.</b><br>Re-publish the Stock Alerts tab as CSV.';
+      else if(stockState==="ok"&&stockCount>0) m='<b>Connected, but no rows recognised.</b><br>Row 1 needs headers like <code>engineer</code>, <code>item</code>, <code>job</code>, <code>message</code>.';
+      else if(stockState==="ok") m='<b>Connected \u2014 no stock alerts.</b><br>Rows added to the Plugin Stock Alerts tab show here.';
+      else m='No stock alerts to show yet.';
+      view.innerHTML='<div class="stockempty">'+m+'</div>';
+      return;
+    }
+    function rank(s){ if(stockNotFound(s)&&statusOf(s.id)!=="actioned") return -1; var v=statusOf(s.id); return v==="urgent"?0:(v==="actioned"?2:1); }
+    var sorted=vis.slice().sort(function(a,b){ var r=rank(a)-rank(b); if(r) return r; return (Date.parse(b.when)||0)-(Date.parse(a.when)||0); });
+    var t5=0,t8=0,tep=0;
+    vis.forEach(function(s){ if(statusOf(s.id)!=="urgent") return; var t=(statuses[s.id]&&statuses[s.id].ctype)||""; if(t==="5m")t5++; else if(t==="8m")t8++; else if(t==="epod")tep++; });
+    var tally='<div class="stocktally">Chargers to move to Plug In stock: '+
+      '<span class="tcount">5m <b>'+t5+'</b></span>'+
+      '<span class="tcount">8m <b>'+t8+'</b></span>'+
+      '<span class="tcount">ePod <b>'+tep+'</b></span></div>';
+    view.innerHTML=tally+'<div class="stockgrid">'+sorted.map(stockCardHtml).join("")+'</div>';
+    wireCards(view);
+  }
+  function openStockDetail(id){
+    var s=null; for(var i=0;i<stock.length;i++){ if(stock[i].id===id){ s=stock[i]; break; } }
+    if(!s) return;
+    var st=statusOf(id), blk=(statuses[id]&&statuses[id].blocker)||"";
+    el("detailTitle").firstChild.textContent=(s.engineer||s.item||"Stock alert")+" ";
+    function seg(v){ return '<button data-id="'+esc(id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+STK_LABEL[v]+'</button>'; }
+    var html='<div class="seg dstatus">'+seg("pending")+seg("actioned")+seg("urgent")+'</div>';
+    if(stockNotFound(s)) html+='<div class="gapbar" style="margin-bottom:12px">'+ICON.alert+' Charger not found by the Zap \u2014 no serial matched. Check if this was consignment or our stock.</div>';
+    html+=drow("Engineer", s.engineer)+drow("Serial", stripUrls(s.serial))+drow("Item", s.item)+drow("Qty", s.qty)+drow("Job", s.job)+drow("When", s.when?fmtTime(s.when):"")+drow("Detail", s.message);
+    html+=imageBlock(stockNotFound(s)?findImageUrl(s):"");
+    var extra="";
+    if(s._raw){ Object.keys(s._raw).forEach(function(k){ var key=String(k).trim(), val=String(s._raw[k]||"").trim(); if(!val) return; var known=false; Object.keys(SMAP).forEach(function(f){ if(synMatch(SMAP[f],key)) known=true; }); if(known) return; extra+=drow(key,val); }); }
+    if(extra) html+='<div class="dsec">Other columns from the sheet</div>'+extra;
+    html+='<div class="blocker" style="display:block;margin-top:14px"><label style="font-size:12px;font-weight:600;color:var(--muted)">Note</label>'+
+      '<input id="detailBlk" name="note" data-id="'+esc(id)+'" placeholder="e.g. queried with engineer, wrong job" value="'+esc(blk)+'"></div>';
+    html+='<button class="ghost danger" id="detailDel" data-id="'+esc(id)+'" style="margin-top:16px;width:100%">Dismiss this alert</button>';
+    el("detailBody").innerHTML=html;
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll(".seg button"), function(b){ b.onclick=function(){ setStatus(b.getAttribute("data-id"), b.getAttribute("data-s")); openStockDetail(id); }; });
+    var inp=el("detailBlk"); if(inp) inp.onchange=function(){ setBlocker(inp.getAttribute("data-id"), inp.value); };
+    var del=el("detailDel"); if(del) del.onclick=function(){ deleteCard(del.getAttribute("data-id")); };
+    wireDetailImage();
+    el("detail").classList.add("show");
+  }
+
+  function renderNotifications(){
+    var view=el("notifBody");
+    if(!view) return;
+    var items=notifItems();
+    if(!items.length){
+      view.innerHTML='<div class="notifempty"><b>Nothing needs chasing.</b><br>Jobs appear here as their date comes within 3 days, and drop off once you mark them Actioned.</div>';
+      return;
+    }
+    view.innerHTML=items.map(notifCardHtml).join("");
+    wireCards(view);
+  }
+
+  function stat(cls, n, label){ return '<div class="stat '+cls+'"><b>'+n+'</b><span>'+label+'</span></div>'; }
+
+  function fmtTime(s){
+    if(!s) return "";
+    var d=new Date(s);
+    if(isNaN(d)) return s;                     // pass raw text through if not a date
+    return d.toLocaleString([], {weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"});
+  }
+
+  function cardHtml(s, opts){
+    opts = opts || {};
+    var st=statusOf(s.id);
+    var blk=(statuses[s.id]&&statuses[s.id].blocker)||"";
+    var meta="";
+    if(s.start) meta+='<span class="m">'+ICON.clock+esc(fmtTime(s.start))+'</span>';
+    if(s.location) meta+='<span class="m">'+ICON.pin+esc(s.location)+'</span>';
+    var notes = s.notes?'<div class="cardnote">'+esc(s.notes)+'</div>':'';
+    var eng = opts.showEngineer ? '<div class="cardeng">'+esc(s.engineer)+'</div>' : '';
+    function seg(v,label){ return '<button data-id="'+esc(s.id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+label+'</button>'; }
+    return '<div class="card s-'+st+'" data-id="'+esc(s.id)+'">'+
+      '<button class="carddel" data-del="'+esc(s.id)+'" title="Remove from board">\u00d7</button>'+
+      '<div class="card-body" data-open="'+esc(s.id)+'">'+
+        eng+
+        '<div class="title">'+esc(s.job_title)+'</div>'+
+        (meta?'<div class="meta">'+meta+'</div>':'')+
+        notes+
+      '</div>'+
+      '<div class="seg">'+seg("pending","Pending")+seg("actioned","Actioned")+seg("urgent","Urgent")+'</div>'+
+      '<div class="blocker"><input name="note" data-id="'+esc(s.id)+'" placeholder="What\u2019s blocking this?" value="'+esc(blk)+'" /></div>'+
+      '</div>';
+  }
+
+  function setUpdated(){
+    if(!lastOk){ el("updated").textContent=""; return; }
+    el("updated").textContent = "Updated "+new Date(lastOk).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  }
+  function markStale(){ el("livePill").classList.add("stale"); el("liveText").textContent="Reconnecting"; }
+  function markLive(){ el("livePill").classList.remove("stale"); el("liveText").textContent="Live"; }
+  function showError(m){ var e=el("errbar"); e.textContent=m; e.classList.add("show"); }
+  function hideErr(){ el("errbar").classList.remove("show"); markLive(); }
+
+  /* ---------- demo ---------- */
+  /* ---------- job detail ---------- */
+  var STATUS_LABEL = { pending:"Pending", actioned:"Actioned", urgent:"Urgent" };
+  function drow(label,val){ return val ? '<div class="drow"><span>'+esc(label)+'</span><div>'+esc(val)+'</div></div>' : ''; }
+
+  function openDetail(id){
+    if(id.indexOf("tsk::")===0){ openTaskDetail(id); return; }
+    if(id.indexOf("err::")===0){ openErrorDetail(id); return; }
+    if(id.indexOf("stk::")===0){ openStockDetail(id); return; }
+    if(id.indexOf("flw::")===0){ openFlowDetail(id); return; }
+    var s=null;
+    for(var i=0;i<shifts.length;i++){ if(shifts[i].id===id){ s=shifts[i]; break; } }
+    if(!s) return;
+    var st=statusOf(id), blk=(statuses[id]&&statuses[id].blocker)||"";
+    el("detailTitle").firstChild.textContent = s.job_title+" ";
+
+    // status control
+    function seg(v){ return '<button data-id="'+esc(id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+STATUS_LABEL[v]+'</button>'; }
+    var html = '<div class="seg dstatus">'+seg("pending")+seg("actioned")+seg("urgent")+'</div>';
+
+    // known fields
+    html += drow("Engineer", s.engineer);
+    html += drow("Start", s.start? fmtTime(s.start) : "");
+    html += drow("End", s.end? fmtTime(s.end) : "");
+    html += drow("Location", s.location);
+    html += drow("Notes", s.notes);
+    html += drow("Shift ID", s.shift_id);
+
+    // every remaining column from the sheet, so nothing is hidden
+    var shown = {engineer:1,start:1,end:1,location:1,notes:1};
+    var extra="";
+    if(s._raw){
+      Object.keys(s._raw).forEach(function(k){
+        var key=String(k).trim(), low=key.toLowerCase(), val=String(s._raw[k]||"").trim();
+        if(!val) return;
+        // skip the ones already surfaced above (match by any mapped synonym)
+        var isKnown=false;
+        Object.keys(MAP).forEach(function(f){ if(synMatch(MAP[f], key) && (shown[f]||f==="job_title"||f==="shift_id")) isKnown=true; });
+        if(isKnown) return;
+        extra += drow(key, val);
+      });
+    }
+    if(extra) html += '<div class="dsec">Other columns from the sheet</div>'+extra;
+
+    // blocker note
+    html += '<div class="blocker"><label>What\u2019s blocking this? (shown on urgent cards)</label>'+
+            '<input id="detailBlk" name="note" data-id="'+esc(id)+'" placeholder="e.g. waiting on parts, access issue\u2026" value="'+esc(blk)+'" /></div>';
+    html += '<button class="ghost danger" id="detailDel" data-id="'+esc(id)+'" style="margin-top:16px;width:100%">Remove this job from the board</button>';
+
+    el("detailBody").innerHTML = html;
+
+    // wire status + blocker inside the modal
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll(".seg button"), function(b){
+      b.onclick=function(){ setStatus(b.getAttribute("data-id"), b.getAttribute("data-s")); openDetail(id); };
+    });
+    var inp=el("detailBlk");
+    if(inp) inp.onchange=function(){ setBlocker(inp.getAttribute("data-id"), inp.value); };
+    var del=el("detailDel");
+    if(del) del.onclick=function(){ deleteCard(del.getAttribute("data-id")); };
+
+    el("detail").classList.add("show");
+  }
+  function closeDetail(){ el("detail").classList.remove("show"); }
+
+  var ERR_LABEL = { pending:"Open", actioned:"Resolved", urgent:"Urgent" };
+
+  // convert a Google Drive share link to a direct-view URL so <img> can load it
+  function driveDirect(u){
+    var m = String(u).match(/drive\.google\.com\/file\/d\/([^\/?]+)/) || String(u).match(/[?&]id=([^&]+)/);
+    return m ? ("https://drive.google.com/uc?export=view&id="+m[1]) : u;
+  }
+  function imageBlock(url){
+    if(!url || !/^https?:\/\//i.test(url)) return "";
+    var direct = driveDirect(url);
+    var secure = direct.replace(/^http:\/\//i,"https://");   // dodge mixed-content block on https hosts
+    return '<div class="dsec">Image</div>'+
+      '<a class="imglink" href="'+esc(url)+'" target="_blank" rel="noopener">Open image in new tab \u2197</a>'+
+      '<img class="detailimg" src="'+esc(secure)+'" alt="attached image" referrerpolicy="no-referrer" />'+
+      '<div class="imgfail" style="display:none">Couldn\u2019t preview this image here \u2014 open it with the link above. (A private host or one that needs sign-in can\u2019t be previewed.)</div>';
+  }
+  function extractImageUrl(text){ var m=String(text||"").match(/https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp)(?:\?[^\s]*)?/i); return m?m[0]:""; }
+  function stripUrls(s){ return String(s||"").replace(/https?:\/\/[^\s]+/gi,"").replace(/\s+/g," ").trim(); }
+  function findImageUrl(e){
+    if(!e) return "";
+    var pools=[]; if(e.image) pools.push(e.image);
+    if(e._raw) Object.keys(e._raw).forEach(function(k){ pools.push(e._raw[k]); });
+    for(var i=0;i<pools.length;i++){ var u=extractImageUrl(pools[i]); if(u) return u; }
+    if(e.image && /^https?:\/\//i.test(e.image)) return e.image;   // plain URL, no extension
+    return "";
+  }
+  function wireDetailImage(){
+    var img = el("detailBody").querySelector(".detailimg");
+    if(!img) return;
+    var triedReferrer=false;
+    img.onerror = function(){
+      if(!triedReferrer){                       // CDN may require a referrer — retry once with one
+        triedReferrer=true;
+        img.referrerPolicy="origin";
+        var src=img.src; img.src=""; img.src=src;
+        return;
+      }
+      img.style.display="none";
+      var f = el("detailBody").querySelector(".imgfail");
+      if(f) f.style.display="block";
+    };
+  }
+
+  function openErrorDetail(id){
+    var e=null;
+    for(var i=0;i<errors.length;i++){ if(errors[i].id===id){ e=errors[i]; break; } }
+    if(!e) return;
+    var st=statusOf(id), blk=(statuses[id]&&statuses[id].blocker)||"";
+    el("detailTitle").firstChild.textContent = (e.zap||"Zap error")+" ";
+    function seg(v){ return '<button data-id="'+esc(id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+ERR_LABEL[v]+'</button>'; }
+    var html = '<div class="seg dstatus">'+seg("pending")+seg("actioned")+seg("urgent")+'</div>';
+    html += drow("When", e.when? fmtTime(e.when) : "");
+    html += drow("Zap", e.zap);
+    html += drow("Serial", e.serial);
+    html += drow("Step", e.step);
+    html += drow("Message", e.message);
+    // any remaining columns
+    var extra="";
+    if(e._raw){
+      Object.keys(e._raw).forEach(function(k){
+        var key=String(k).trim(), low=key.toLowerCase(), val=String(e._raw[k]||"").trim();
+        if(!val) return;
+        var known=false;
+        Object.keys(EMAP).forEach(function(f){ if(synMatch(EMAP[f], key)) known=true; });
+        if(known) return;
+        extra += drow(key, val);
+      });
+    }
+    if(extra) html += '<div class="dsec">Other columns from the sheet</div>'+extra;
+    html += imageBlock(findImageUrl(e));
+    html += '<div class="blocker"><label>Note (shown on urgent)</label>'+
+            '<input id="detailBlk" name="note" data-id="'+esc(id)+'" placeholder="e.g. re-ran the Zap, waiting on\u2026" value="'+esc(blk)+'" /></div>';
+    html += '<button class="ghost danger" id="detailDel" data-id="'+esc(id)+'" style="margin-top:16px;width:100%">Dismiss this error</button>';
+    el("detailBody").innerHTML = html;
+    wireDetailImage();
+    Array.prototype.forEach.call(el("detailBody").querySelectorAll(".seg button"), function(b){
+      b.onclick=function(){ setStatus(b.getAttribute("data-id"), b.getAttribute("data-s")); openErrorDetail(id); };
+    });
+    var inp=el("detailBlk");
+    if(inp) inp.onchange=function(){ setBlocker(inp.getAttribute("data-id"), inp.value); };
+    var del=el("detailDel");
+    if(del) del.onclick=function(){ deleteCard(del.getAttribute("data-id")); };
+    el("detail").classList.add("show");
+  }
+
+  function demo(){
+    var now=Date.now(), H=3600000;
+    var rows=[
+      ["101","Jack Place","EV charger install — 7kW wallbox","2 Elm Rd, Leeds","",now+1*H],
+      ["102","Jack Place","Consumer unit upgrade","14 Oak Ave, Leeds","Customer wants same-day cert",now+4*H],
+      ["103","Marcus Ford","Fault-find: tripping RCD","Unit 9 Trade Park","",now+2*H],
+      ["104","Marcus Ford","Commissioning — dual socket","Retail site, Wakefield","",now+5*H],
+      ["105","Marcus Ford","EVSE handover + app setup","31 Vale Cres","",now+7*H],
+      ["106","Priya Shah","Site survey — 3-phase supply","Depot B","Awaiting DNO confirmation",now+1.5*H],
+      ["107","Priya Shah","Cable run + containment","Depot B","",now+6*H],
+      ["108","Tom Reilly","Snagging revisit","5 Birch Cl","Second visit, cover plate",now+3*H],
+      ["109","Danny O\u2019Neil","Charger swap under warranty","22 Cedar Way","Part on van",now+2.5*H]
+    ];
+    shifts = toShifts(rows.map(function(r){ return {shift_id:r[0],engineer:r[1],job_title:r[2],location:r[3],notes:r[4],start:new Date(r[5]).toISOString()}; }));
+    // seed a couple of statuses so the board looks alive
+    if(!statuses["103"]) statuses["103"]={status:"urgent",blocker:"No spare RCD in stock"};
+    if(!statuses["102"]) statuses["102"]={status:"actioned"};
+    if(!statuses["108"]) statuses["108"]={status:"urgent"};
+    // seed sample errors so the Errors tab can be tested too
+    var erows=[
+      ["E-5001","Charger deduction","No charger match for ID 8842 \u2014 lookup returned an error object","Lookup spreadsheet row",now-0.5*H],
+      ["E-5002","End-of-day stock sync","Google Sheets: row not found (per_page ceiling hit at 100)","Update row",now-2*H],
+      ["E-5003","New shift \u2192 board","WhatsApp step failed: recipient not opted in","Send WhatsApp",now-6*H]
+    ];
+    errors = toErrors(erows.map(function(r){ return {error_id:r[0],zap:r[1],message:r[2],step:r[3],time:new Date(r[4]).toISOString()}; }));
+    errState="ok"; errCount=erows.length; errLooksLikeJobs=false;
+    if(!statuses["err::E-5001"]) statuses["err::E-5001"]={status:"urgent"};
+    var srows=[
+      ["S-9001","Jake Reed","Fully Loaded CU","2","3 East Hill install","Used on wrong job \u2014 booked to survey, not install",now-3*H],
+      ["S-9002","Marcus Ford","6mm T&E (Per Meter)","50","Depot B","No job reference logged for this stock",now-20*H],
+      ["S-9003","Priya Shah","Wiska Boxes","6","31 Vale Cres","Qty higher than job estimate",now-30*H]
+    ];
+    stock = toStock(srows.map(function(r){ return {alert_id:r[0],engineer:r[1],item:r[2],qty:r[3],job:r[4],message:r[5],time:new Date(r[6]).toISOString()}; }));
+    if(stock[1]){ stock[1].serial=""; stock[1].message="POSSIBLE USAGE OF OUR STOCK, ENGINEER TYPED THE SERIAL NUMBER WRONG"; stock[1]._raw.message=stock[1].message; stock[1]._raw["Serial Number"]="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/Camera_font_awesome.svg/240px-Camera_font_awesome.svg.png"; }
+    stock.push(toStock([{alert_id:"S-LINK",engineer:"Priya Shah","serial":"CHG-11004",message:"POSSIBLE USAGE OF OUR STOCK, ENGINEER TYPED THE SERIAL NUMBER WRONG",time:new Date(now-3*H).toISOString()}])[0]);
+    stockState="ok"; stockCount=srows.length;
+    if(!statuses["stk::S-9001"]) statuses["stk::S-9001"]={status:"urgent"};
+    var frows=[
+      // id, engineer, serial, cu, cable, job, charger_found, remove_charger, zap_error
+      ["F-1","Jake Reed","CHG-77812","Fusebox 10-way","25m","3 East Hill","yes","yes",""],
+      ["F-2","Marcus Ford","CHG-90233","Wylex 8-way","18m","Unit 9","yes","yes",""],
+      ["F-3","Priya Shah","CHG-11004","Hager 12-way","40m","Depot B","no","no","No serial match"]
+    ];
+    flowRaw = toFlow(frows.map(function(r,i){ return {flow_id:r[0], time:new Date(now-(i+1)*4*H).toISOString(), engineer:r[1], charger_serial:r[2], cu:r[3], cable:r[4], job:r[5], charger_found:r[6], remove_charger:r[7], zap_error:r[8]}; }));
+    sortlyIdx = {};  // Sortly stage is derived from the Zapier intent + error fields
+    qtyIdx = buildQtyIdx([
+      {serial:"CHG-77812", cu_adjust:"-1", cu_type:"Fusebox 10-way", cable_adjust:"-25", cu_error:"", cable_error:""},
+      {serial:"CHG-90233", cu_adjust:"-1", cu_type:"Wylex 8-way", cable_adjust:"", cu_error:"", cable_error:"Cable item not found"}
+    ]);
+    mergeFlow();
+    flowState="ok"; flowCount=frows.length;
+    tasks = toTasks([
+      {task_id:"task_d1", title:"Order more IP65 CUs", assignee:"Andreas", status:"todo", priority:"high", when:new Date(now-2*H).toISOString()},
+      {task_id:"task_d2", title:"Chase TanSales missing invoice 10442", assignee:"Andy", status:"working", priority:"medium", details:"They're missing 10442 from the weekly batch. Confirm it was raised.", updates:JSON.stringify([{t:now-24*H,by:"Andre",text:"Any luck?"},{t:now-2*H,by:"Andy",text:"On the phone with them now."}]), when:new Date(now-5*H).toISOString()},
+      {task_id:"task_d3", title:"Van MOT booking", assignee:"Andre", status:"blocked", priority:"low", details:"Cert expires end of month.", when:new Date(now-26*H).toISOString()},
+      {task_id:"task_d4", title:"Send Jake his RAMS", assignee:"Andreas", status:"done", priority:"medium", when:new Date(now-50*H).toISOString()},
+      {task_id:"task_sub1", title:"Get me the meter serial for #10442", assignee:"Andy", status:"todo", priority:"medium", parent_id:"task_d2", parent_title:"Chase TanSales missing invoice 10442", from:"Andre", when:new Date(now-1*H).toISOString()}
+    ]);
+    sSet("statuses",statuses);
+    absorbStatuses();
+    lastOk=Date.now(); markLive(); render();
+  }
+
+  /* ---------- refresh loop ---------- */
+  function loop(){
+    if(timer) clearInterval(timer);
+    if(!cfg.url && !cfg.errUrl && !cfg.stockUrl && !cfg.flowUrl && !cfg.sortlyUrl && !cfg.qtyUrl && !cfg.apiUrl) return;
+    timer=setInterval(function(){ refreshAll(false); }, Math.max(10,cfg.secs)*1000);
+  }
+
+  el("tabBoard").onclick=function(){ showTab("board"); };
+  el("tabCalendar").onclick=function(){ showTab("calendar"); };
+  el("tabOrders").onclick=function(){ showTab("orders"); };
+  el("tabTasks").onclick=function(){ showTab("tasks"); };
+  el("tabFlow").onclick=function(){ showTab("flow"); };
+  el("tabStock").onclick=function(){ showTab("stock"); };
+  el("tabErrors").onclick=function(){ showTab("errors"); };
+  el("bellBtn").onclick=function(ev){
+    ev.stopPropagation();
+    var p=el("notifPanel");
+    if(p.hidden){ renderNotifications(); p.hidden=false; } else { p.hidden=true; }
+  };
+  document.addEventListener("click", function(ev){
+    var p=el("notifPanel");
+    if(!p || p.hidden) return;
+    if(ev.target.closest("#notifPanel") || ev.target.closest("#bellBtn")) return;
+    p.hidden=true;
+  });
+
+  /* ---------- settings wiring ---------- */
+  function openModal(){
+    el("cfgApi").value=cfg.apiUrl||""; el("cfgUrl").value=cfg.url; el("cfgSecs").value=cfg.secs; el("cfgHook").value=cfg.delHook||""; el("cfgErrUrl").value=cfg.errUrl||""; el("cfgStockUrl").value=cfg.stockUrl||""; el("cfgFlowUrl").value=cfg.flowUrl||""; el("cfgSortlyUrl").value=cfg.sortlyUrl||""; el("cfgQtyUrl").value=cfg.qtyUrl||"";
+    var n=hiddenCount();
+    el("cfgRestore").textContent = n ? ("Restore hidden jobs ("+n+")") : "Restore hidden jobs";
+    el("cfgRestore").disabled = !n;
+    el("buildNote").textContent = "Build "+BUILD;
+    el("modal").classList.add("show");
+  }
+  function closeModal(){ el("modal").classList.remove("show"); }
+
+  /* ---------- theme ---------- */
+  var THEME_ICON = {
+    sun:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+    moon:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>'
+  };
+  function applyTheme(t){
+    var dark = t==="dark";
+    document.body.classList.toggle("dark", dark);
+    var b=el("themeBtn");
+    b.innerHTML = dark ? THEME_ICON.sun : THEME_ICON.moon;
+    b.title = dark ? "Switch to light mode" : "Switch to dark mode";
+  }
+  async function toggleTheme(){
+    cfg.theme = document.body.classList.contains("dark") ? "light" : "dark";
+    applyTheme(cfg.theme);
+    await sSet("config", cfg);
+  }
+  el("themeBtn").onclick=toggleTheme;
+
+  el("settingsBtn").onclick=openModal;
+  el("modalClose").onclick=closeModal;
+  el("modal").onclick=function(e){ if(e.target===el("modal")) closeModal(); };
+  el("detailClose").onclick=closeDetail;
+  el("detail").onclick=function(e){ if(e.target===el("detail")) closeDetail(); };
+  document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ closeModal(); closeDetail(); } });
+  el("refreshBtn").onclick=function(){ refreshAll(true); };
+
+  el("setupSave").onclick=async function(){
+    cfg.url=el("setupUrl").value.trim(); await sSet("config",cfg); loop(); fetchShifts(true);
+  };
+  el("setupDemo").onclick=demo;
+  el("cfgDemo").onclick=function(){ closeModal(); demo(); };
+  el("cfgSave").onclick=async function(){
+    cfg.apiUrl=el("cfgApi").value.trim();
+    cfg.url=el("cfgUrl").value.trim();
+    cfg.secs=parseInt(el("cfgSecs").value,10)||60;
+    cfg.delHook=el("cfgHook").value.trim();
+    cfg.errUrl=el("cfgErrUrl").value.trim(); cfg.stockUrl=el("cfgStockUrl").value.trim(); cfg.flowUrl=el("cfgFlowUrl").value.trim(); cfg.sortlyUrl=el("cfgSortlyUrl").value.trim(); cfg.qtyUrl=el("cfgQtyUrl").value.trim();
+    await sSet("config",cfg); closeModal(); loop();
+    if(cfg.apiUrl){ fetchData(true); }
+    else if(cfg.url||cfg.errUrl||cfg.stockUrl||cfg.flowUrl||cfg.sortlyUrl||cfg.qtyUrl){ fetchShifts(true); fetchErrors(); fetchStock(); fetchFlow(); fetchSortly(); fetchQty(); }
+    else { shifts=[]; render(); }
+  };
+  el("cfgClear").onclick=async function(){
+    statuses={}; await sSet("statuses",statuses); closeModal(); render();
+  };
+  el("cfgRestore").onclick=async function(){ await restoreAll(); openModal(); };
+
+  /* ---------- boot ---------- */
+  function sessionGet(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
+  function showGate(pass, onOk){
+    var ov=document.createElement("div");
+    ov.style.cssText="position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:var(--surface);padding:20px";
+    ov.innerHTML='<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;max-width:340px;width:100%;text-align:center">'
+      +'<div style="font-size:18px;font-weight:700;margin-bottom:6px">Plug In Dashboard</div>'
+      +'<div style="font-size:13px;color:var(--muted);margin-bottom:16px">Enter the passcode to continue</div>'
+      +'<input id="__gate" type="password" placeholder="Passcode" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;background:var(--panel);color:var(--ink)"/>'
+      +'<div id="__gatemsg" style="color:var(--urgent);font-size:12px;min-height:16px;margin:8px 0 2px"></div>'
+      +'<button id="__gatebtn" class="primary" style="width:100%">Enter</button></div>';
+    document.body.appendChild(ov);
+    var inp=ov.querySelector("#__gate"), btn=ov.querySelector("#__gatebtn"), msg=ov.querySelector("#__gatemsg");
+    function tryUnlock(){
+      if(inp.value===pass){ try{sessionStorage.setItem("pib_unlock",pass);}catch(e){} ov.parentNode&&ov.parentNode.removeChild(ov); onOk(); }
+      else { msg.textContent="Incorrect passcode"; inp.value=""; inp.focus(); }
+    }
+    btn.onclick=tryUnlock;
+    inp.onkeydown=function(e){ if(e.key==="Enter") tryUnlock(); };
+    inp.focus();
+  }
+
+  (async function(){
+    var c = await sGet("config"); if(c) cfg=Object.assign(cfg,c);
+    var DEF = (typeof window!=="undefined" && window.PIB_CONFIG) ? window.PIB_CONFIG : {};
+    // URLs from config.js win (so a new laptop needs no setup, and changing config.js propagates)
+    ["apiUrl","url","errUrl","delHook"].forEach(function(k){ if(DEF[k]) cfg[k]=DEF[k]; });
+    if(DEF.secs && !c) cfg.secs=DEF.secs;
+    applyTheme(cfg.theme || "dark");
+    var s = await sGet("statuses"); if(s) statuses=s;
+    var d = await sGet("dismissed"); if(d) dismissed=d;
+    var iv = await sGet("invoices"); if(iv) invoices=iv;
+    var um = await sGet("unmatched"); if(um) unmatched=um;
+
+    function startBoard(){
+      render();
+      if(cfg.apiUrl){ loop(); fetchData(true); }
+      else if(cfg.url || cfg.errUrl || cfg.stockUrl || cfg.flowUrl || cfg.sortlyUrl || cfg.qtyUrl){ loop(); refreshAll(true); }
+    }
+    var pass = DEF.passcode || "";
+    if(pass && sessionGet("pib_unlock")!==pass) showGate(pass, startBoard);
+    else startBoard();
+  })();
+})();
+</script>
