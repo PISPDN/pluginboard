@@ -612,6 +612,8 @@
   <button class="tab" data-tab="stock" id="tabStock">Stock <span class="tabbadge" id="stockBadge" hidden>0</span></button>
   <button class="tab" data-tab="troubleshoots" id="tabTroubleshoots">Troubleshoots <span class="tabbadge" id="tshBadge" hidden>0</span></button>
   <button class="tab" data-tab="errors" id="tabErrors">Errors <span class="tabbadge" id="errBadge" hidden>0</span></button>
+  <button class="tab" data-tab="otherinfo" id="tabOtherInfo">Other info <span class="tabbadge" id="infBadge" hidden>0</span></button>
+  <a class="tab" href="/engineers" title="Who's on monthly deliveries, and each engineer's Sortly folder">Engineers</a>
 </div>
 
 <div class="summary" id="summary" style="display:none"></div>
@@ -627,6 +629,7 @@
 <div class="stockview" id="stockview" style="display:none"></div>
 <div class="tshview" id="tshview" style="display:none"></div>
 <div class="errview" id="errview" style="display:none"></div>
+<div class="tshview" id="infview" style="display:none"></div>
 <div id="printarea"></div>
 
 <!-- notifications dropdown (opened by the bell) -->
@@ -733,9 +736,7 @@
   </div>
 </div>
 
-<!-- Your saved settings (URLs, optional passcode). Create config.js once in the repo;
-     board updates never overwrite it. If it's missing, the board just uses Settings. -->
-<script src="config.js"></script>
+<!-- The app serves this page and its data; there is no config.js. -->
 <script>
 (function(){
   "use strict";
@@ -788,7 +789,9 @@
 
   var STAT = { pending:"pending", actioned:"actioned", urgent:"urgent" };
   var el = function(id){ return document.getElementById(id); };
-  var BUILD = "2026-10-02c · Orders: send, delivery check, chase list";
+  var BUILD = "2026-10-05a · Standalone app: own login and API, no Apps Script or Zapier";
+  // APP = served by the Plug In app (server.js). Every read and write goes to its /api, behind its login.
+  var APP = true;
 
   /* ---------- header normalisation ---------- */
   var MAP = {
@@ -1157,7 +1160,25 @@
   }
   function matchFor(it,id){ if(isTshId(id)) return tshMatch(it); return isErrId(id)? errMatch(it) : (isStkId(id)? stockMatch(it) : (isFlwId(id)? flowMatch(it) : (isTaskId(id)? taskMatch(it) : jobMatch(it)))); }
   function writeUrl(){ return cfg.apiUrl || cfg.delHook; }
+  // the app answers the board's old Apps Script calls at /api/legacy, behind the login
+  function appCall(method, params){
+    var opts = { method: method, credentials: "same-origin", cache: "no-store" };
+    var url = "/api/legacy";
+    if(method === "GET"){ url += "?" + Object.keys(params||{}).map(function(k){ return encodeURIComponent(k)+"="+encodeURIComponent(params[k]); }).join("&"); }
+    else { opts.headers = { "Content-Type": "application/json" }; opts.body = JSON.stringify(params||{}); }
+    return fetch(url, opts).then(function(r){
+      if(r.status === 401){ showLogin(); throw new Error("Signed out — sign in again"); }
+      return r.json();
+    });
+  }
   function apiPost(fields){
+    if(APP){
+      // writes now report failure instead of looking fine and reverting on the next refresh
+      appCall("POST", fields).then(function(d){
+        if(!d || !d.ok) showError("Couldn\u2019t save that change: " + ((d && d.error) || "no reply") + ". Refresh and try again.");
+      }).catch(function(e){ showError("Couldn\u2019t save that change: " + e.message); });
+      return;
+    }
     var target = writeUrl(); if(!target) return;
     try{
       var body=new URLSearchParams();
@@ -1167,6 +1188,13 @@
   }
   // JSONP so the browser can read Apps Script data across origins without CORS
   function jsonp(url, params, cb, ms){
+    if(APP){
+      var done=false;
+      var t=setTimeout(function(){ if(!done){ done=true; cb(new Error("timeout")); } }, ms || 120000);
+      appCall("GET", params).then(function(d){ if(done) return; done=true; clearTimeout(t); cb(null, d); },
+                                   function(e){ if(done) return; done=true; clearTimeout(t); cb(e); });
+      return;
+    }
     var name="__pib"+Date.now()+Math.floor(Math.random()*1e4);
     var q=Object.keys(params||{}).map(function(k){return encodeURIComponent(k)+"="+encodeURIComponent(params[k]);}).join("&");
     var src=url+(url.indexOf("?")>-1?"&":"?")+q+"&callback="+name+"&_ts="+Date.now();
@@ -1205,7 +1233,7 @@
     if(!cfg.apiUrl){ if(cb) cb(new Error("no api url")); return; }
     jsonp(cfg.apiUrl, { action:"data" }, function(err,data){
       if(err || !data || !data.ok){
-        if(showErr) showError("Couldn't load live data from the Apps Script. Check the API URL, and that it's deployed with access set to 'Anyone'.");
+        if(showErr) showError(APP ? "Couldn't load the board's data from the app — check your connection and refresh." : "Couldn't load live data from the Apps Script. Check the API URL, and that it's deployed with access set to 'Anyone'.");
         markStale(); if(cb) cb(err||new Error("no data")); return;
       }
       shifts = toShifts(data.jobs||[]);
@@ -1215,6 +1243,7 @@
       sortlyIdx = buildSortlyIdx(data.sortlylog||[]);
       qtyIdx = buildQtyIdx(data.qtylog||[]);
       tasks = toTasks(data.tasks||[]);
+      otherInfo = data.otherinfo || [];
       // older Code.gs builds don't send this key at all — tell the tab so it can say "redeploy"
       if(data.troubleshoots===undefined){ troubleshoots=[]; tshState="olddeploy"; }
       else { troubleshoots = toTroubleshoots(data.troubleshoots); tshState="ok"; }
@@ -1725,6 +1754,7 @@
     board.scrollLeft = sx;
 
     wireCards(board);
+    renderOtherInfo();
     renderErrors();
     renderStock();
     renderLevels();
@@ -1878,7 +1908,9 @@
     var vb=el("vanBadge");
     if(vb){ if(nVan>0){ vb.textContent=nVan; vb.hidden=false; } else { vb.hidden=true; } }
     // the bell gets ONE van line (not one per engineer), so it stays readable
-    var nb=el("notifBadge"), nLow=lowLevels().length, n=notifItems().length+nLow+nTsh+(nVan?1:0);
+    var nInf=openOtherInfo().length, ib=el("infBadge");
+    if(ib){ if(nInf>0){ ib.textContent=nInf; ib.hidden=false; } else { ib.hidden=true; } }
+    var nb=el("notifBadge"), nLow=lowLevels().length, n=notifItems().length+nLow+nTsh+(nVan?1:0)+nInf;
     var lb=el("lvlBadge");
     if(lb){ if(nLow>0){ lb.textContent=nLow; lb.hidden=false; } else { lb.hidden=true; } }
     if(n>0){ nb.textContent=n; nb.hidden=false; } else { nb.hidden=true; }
@@ -1909,6 +1941,7 @@
     el("vanview").style.display = t==="vans"?"block":"none";
     el("errview").style.display  = t==="errors"?"block":"none";
     el("tshview").style.display  = t==="troubleshoots"?"block":"none";
+    el("infview").style.display  = t==="otherinfo"?"block":"none";
   }
 
   function showTab(t){ currentTab=t; render(); if(t==="orders") renderOrders(); }
@@ -2969,10 +3002,20 @@
              : (auto==="fail"?'<span class="fpill fail">Fail</span>':(auto==="check"?'<span class="fpill check">Check</span>':'<span class="fpill ok">OK</span>'));
     var head='<div class="fhead"><span class="feng">'+esc(f.engineer||"\u2014")+'</span><span class="fwhen">'+esc(f.when?fmtTime(f.when):"")+'</span>'+pill+'</div>';
     var c1='<div class="fstage"><div class="fstage-h">Connecteam</div>'+frow("Serial",f.serial)+frow("CU",f.cu)+frow("Cable",f.cable)+frow("Job",tidyJob(f.job))+'</div>';
-    var c2='<div class="fstage"><div class="fstage-h">Zapier</div>'+frowD("Charger found",f.z_matched)+frowD("Remove charger",f.z_remove)+frow("CU adjust",f.z_cu)+frow("Cable adjust",f.z_cable)+(f.z_error?frowErr("Error",f.z_error):"")+(f.q_error?frowErr("Qty error",f.q_error):"")+'</div>';
+    var fr=f._raw||{}, isApp=APP && fr.source==="app";
+    var c2='<div class="fstage"><div class="fstage-h">'+(isApp?(fr.mode==="shadow"?"App (shadow)":"App"):"Zapier")+'</div>'+frowD("Charger found",f.z_matched)+frowD("Remove charger",f.z_remove)+frow("CU adjust",f.z_cu)+frow("Cable adjust",f.z_cable)+(f.z_error?frowErr("Error",f.z_error):"")+(f.q_error?frowErr("Qty error",f.q_error):"")+'</div>';
     var viaLink=(statuses[f.id]&&statuses[f.id].linkDone&&yn(f.s_removed)!==true&&!(statuses[f.id].ovRemoved==="yes"||statuses[f.id].ovRemoved==="no"))
       ? '<div class="fvia">sorted in Stock alerts / Errors</div>' : '';
     var c3='<div class="fstage"><div class="fstage-h">Sortly</div>'+frowD("Charger removed",flowRemoved(f))+viaLink+frowD("CU updated",flowCu(f))+frowD("Cable updated",flowCable(f))+(f.s_error?frowErr("Error",f.s_error):"")+'</div>';
+    if(isApp){
+      c3+='<div class="fstage"><div class="fstage-h">This run</div>'+
+        (fr.would_do?frow("Would do",fr.would_do):"")+
+        (fr.monthly_deliveries?frow("Monthly deliveries",fr.monthly_deliveries):"")+
+        (fr.cu_note?frow("CU",fr.cu_note):"")+(fr.cable_note?frow("Cable",fr.cable_note):"")+
+        (fr.qty_error?frow("Note",fr.qty_error):"")+
+        '<button class="ghost" data-rerun="'+esc(fr.flow_id||"")+'" style="margin-top:6px">Re-run</button> '+
+        '<button class="ghost" data-rerun="'+esc(fr.flow_id||"")+'" data-redo="1" title="Also redo a step that was interrupted part-way — check Sortly first" style="margin-top:6px">Redo interrupted</button></div>';
+    }
     var arrow='<div class="farrow">\u2192</div>';
     var blockedByErr=!!matchingOpenIssue(f);
     function seg(v,label){
@@ -3095,6 +3138,10 @@
   function peopleOptions(sel){ return PEOPLE.map(function(p){ return '<option'+(canon(sel)===canon(p)?' selected':'')+'>'+p+'</option>'; }).join(""); }
   function subTasksOf(id){ var pid=String(id).replace("tsk::",""); return tasks.filter(function(x){ return x.parent_id && canon(x.parent_id)===canon(pid); }); }
   function notify(f){
+    if(APP){
+      fetch("/api/notify", { method:"POST", credentials:"same-origin", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(f) }).catch(function(){});
+      return;
+    }
     if(!cfg.notifyHook) return;
     try{
       var body=new URLSearchParams();
@@ -3460,12 +3507,24 @@
   };
   function normTs(raw){ var row=buildRow(raw); var o={}; Object.keys(TSMAP).forEach(function(f){ o[f]=pick(row,TSMAP[f]); }); o._raw=raw; return o; }
   function isOhme(t){ return /ohme/i.test(t.key_account||""); }
+  // what the app did in Sortly for this troubleshoot (renamed to the RMA, or name + job details)
+  function tshSortlyRows(t){
+    var r=t._raw||{}; if(!APP) return "";
+    var out="";
+    if(r.rma) out+='<span>RMA</span><div class="sn">'+esc(r.rma)+'</div>';
+    if(r.renamed_to){
+      var how = r.renamed==="yes" ? "Renamed" : (r.renamed==="shadow" ? "Would rename (shadow)" : "Not renamed");
+      out+='<span>Sortly</span><div>'+esc(how)+': <b>'+esc(r.renamed_to)+'</b>'+(r.previous_name?'<div style="color:var(--faint);font-size:12px">was '+esc(r.previous_name)+'</div>':'')+'</div>';
+    }
+    if(r.problem) out+='<span>Check</span><div style="color:var(--urgent)">'+esc(r.problem)+'</div>';
+    return out;
+  }
   function toTroubleshoots(rows){
     var out=[], byId={};
     (rows||[]).forEach(function(raw){
       var t=normTs(raw);
       if(!t.serial && !t.customer && !t.address && !t.key_account) return;
-      if(isOhme(t)) return;                        // Ohme runs through the RMA Zap, not here
+      if(isOhme(t) && !APP) return;                // Apps Script board: Ohme runs through the RMA Zap
       t.id="tsh::"+(t.ts_id || contentKey(raw));
       if(byId[t.id]!==undefined){ out[byId[t.id]]=t; } else { byId[t.id]=out.length; out.push(t); }
     });
@@ -3489,6 +3548,7 @@
       '<span>Serial</span><div class="sn">'+(t.serial?esc(t.serial)+'<button class="copybtn" data-copy="'+esc(t.serial)+'">Copy</button>':'<i style="color:var(--faint)">not given</i>')+'</div>'+
       '<span>Customer</span><div>'+esc(t.customer||"—")+'</div>'+
       '<span>Address</span><div>'+esc(t.address||"—")+'</div>'+
+      tshSortlyRows(t)+
       '</div>';
     var meta="";
     if(t.when) meta+='<span class="m">'+ICON.clock+esc(fmtTime(t.when))+'</span>';
@@ -3536,7 +3596,8 @@
       var m;
       if(!cfg.apiUrl) m='<b>Troubleshoots need the live connection.</b><br>Set the Live API URL in Settings.';
       else if(tshState==="olddeploy") m='<b>The live Apps Script doesn’t send troubleshoots yet.</b><br>Paste the new Code.gs, then Deploy → Manage deployments → pencil → New version → Deploy.';
-      else m='<b>No Hypervolt / EVEC troubleshoots yet.</b><br>When an engineer submits the Troubleshoots workflow with a Key Account other than Ohme, it lands here with the serial, customer and address — and Slack gets a message.';
+      else m = APP ? '<b>No troubleshoots yet.</b><br>Each Troubleshoot workflow lands here: Ohme chargers renamed to their RMA number, Hypervolt / EVEC renamed with the job details so you know where to collect them, and anything the app couldn\u2019t find flagged for you.'
+                   : '<b>No Hypervolt / EVEC troubleshoots yet.</b><br>When an engineer submits the Troubleshoots workflow with a Key Account other than Ohme, it lands here with the serial, customer and address — and Slack gets a message.';
       view.innerHTML='<div class="stockempty">'+m+'</div>';
       return;
     }
@@ -3582,11 +3643,69 @@
     el("detail").classList.add("show");
   }
 
+  /* =========================================================================
+     ANY OTHER INFO — the Connecteam "Any Other Info" workflow, flagged. Nothing else happens.
+     ========================================================================= */
+  var otherInfo = [];
+  var INF_LABEL = { pending:"New", actioned:"Seen" };
+  function openOtherInfo(){ return (otherInfo||[]).filter(function(x){ return x.status!=="actioned"; }); }
+  function infCardHtml(x){
+    var st = x.status==="actioned" ? "actioned" : "pending";
+    var ans = (x.answers||[]).map(function(a){
+      var imgs=(a.images||[]).map(function(u){ return '<a href="'+esc(u)+'" target="_blank" rel="noopener">photo</a>'; }).join(" · ");
+      return '<span>'+esc(a.question)+'</span><div>'+esc(a.answer||"")+(imgs?(a.answer?' · ':'')+imgs:'')+'</div>';
+    }).join("");
+    return '<div class="card tshcard s-'+st+'">'+
+      '<div class="card-body">'+
+        '<span class="acctchip">Any Other Info</span>'+
+        '<div class="title"><span>'+esc(x.engineer||"Engineer")+'</span></div>'+
+        '<div class="meta"><span class="m">'+ICON.clock+esc(x.when?fmtTime(x.when):"")+'</span>'+(x["last changed by"]?'<span class="m">'+esc(x["last changed by"])+'</span>':'')+'</div>'+
+        '<div class="tshrows">'+ans+'</div>'+
+      '</div>'+
+      '<div class="seg"><button data-inf="'+x._id+'" data-s="pending" class="'+(st==="pending"?"on":"")+'">New</button><button data-inf="'+x._id+'" data-s="actioned" class="'+(st==="actioned"?"on":"")+'">Seen</button></div>'+
+      '<div class="blocker"><input data-infnote="'+x._id+'" placeholder="Note" value="'+esc(x.note||"")+'" /></div>'+
+    '</div>';
+  }
+  function renderOtherInfo(){
+    var view=el("infview"); if(!view) return;
+    var list=(otherInfo||[]).slice().sort(function(a,b){ return (a.status==="actioned")-(b.status==="actioned") || tms(b.when)-tms(a.when); });
+    if(!list.length){ view.innerHTML='<div class="stockempty"><b>Nothing from Any Other Info yet.</b><br>Every time an engineer submits the Any Other Info workflow it shows up here, and on the bell, until you mark it Seen.</div>'; return; }
+    view.innerHTML='<div class="stockgrid">'+list.map(infCardHtml).join("")+'</div>';
+  }
+  function appWrite(type, id, fields){
+    return fetch("/api/write", { method:"POST", credentials:"same-origin", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ type:type, id:id, fields:fields }) })
+      .then(function(r){ return r.json(); }).then(function(d){ if(!d.ok) throw new Error(d.error||"not saved"); return d; });
+  }
+  if(APP) document.addEventListener("click", function(e){
+    var b=e.target.closest && e.target.closest("[data-inf],[data-rerun]");
+    if(!b) return;
+    e.stopPropagation();
+    if(b.hasAttribute("data-inf")){
+      var id=Number(b.getAttribute("data-inf")), s=b.getAttribute("data-s");
+      otherInfo.forEach(function(x){ if(x._id===id) x.status=s; }); render();
+      appWrite("otherinfo", id, { status:s }).catch(function(err){ showError("Couldn\u2019t save: "+err.message); fetchData(false); });
+      return;
+    }
+    var rid=b.getAttribute("data-rerun"); if(!rid) return;
+    b.disabled=true; b.textContent="Queued…";
+    fetch("/api/automation/rerun", { method:"POST", credentials:"same-origin", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ run_id: rid, redo: b.hasAttribute("data-redo") }) })
+      .then(function(r){ return r.json(); }).then(function(d){
+        if(!d.ok){ b.disabled=false; b.textContent="Re-run"; showError(d.error||"Couldn\u2019t re-run"); return; }
+        setTimeout(function(){ fetchData(false); }, 4000);
+      }).catch(function(err){ b.disabled=false; b.textContent="Re-run"; showError(err.message); });
+  }, true);
+  if(APP) document.addEventListener("change", function(e){
+    var t=e.target; if(!t || !t.hasAttribute || !t.hasAttribute("data-infnote")) return;
+    var id=Number(t.getAttribute("data-infnote"));
+    otherInfo.forEach(function(x){ if(x._id===id) x.note=t.value; });
+    appWrite("otherinfo", id, { note:t.value }).catch(function(err){ showError("Couldn\u2019t save: "+err.message); });
+  });
+
   function renderNotifications(){
     var view=el("notifBody");
     if(!view) return;
     var items=notifItems(), lows=lowLevels(), tshs=openTroubleshoots(), vlow=lowVans();
-    if(!items.length && !lows.length && !tshs.length && !vlow.length){
+    if(!items.length && !lows.length && !tshs.length && !vlow.length && !openOtherInfo().length){
       view.innerHTML='<div class="notifempty"><b>Nothing needs chasing.</b><br>Jobs appear here as their date comes within 3 days, and drop off once you mark them Actioned. Sortly folders show here when they run low, and Hypervolt / EVEC troubleshoots until you dismiss them.</div>';
       return;
     }
@@ -3611,8 +3730,19 @@
         '<div class="title">'+vlow.length+' van'+(vlow.length>1?'s':'')+' need chargers</div>'+
         '<div class="meta"><span class="m">'+ICON.box+'To send out: '+parts.join(' · ')+'</span></div></div></div>';
     })() : "";
-    var jobHtml = items.length ? ((lows.length||tshs.length||vlow.length)?'<div class="notifsec">Jobs due</div>':'')+items.map(notifCardHtml).join("") : "";
-    view.innerHTML=lowHtml+vanHtml+tshHtml+jobHtml;
+    var infs=openOtherInfo();
+    var infHtml = infs.length ? '<div class="notifsec">Any Other Info</div>'+infs.slice(0,8).map(function(x){
+      var first=(x.answers||[]).filter(function(a){ return a.answer; })[0];
+      return '<div class="card s-pending" data-infnotif="1"><div class="card-body"><span class="daychip">Other info</span>'+
+        '<div class="title">'+esc(x.engineer||"Engineer")+'</div>'+
+        '<div class="meta"><span class="m">'+ICON.clock+esc(x.when?fmtTime(x.when):"")+'</span>'+(first?'<span class="m">'+esc(String(first.answer).slice(0,80))+'</span>':'')+'</div></div></div>';
+    }).join("") : "";
+    var jobHtml = items.length ? ((lows.length||tshs.length||vlow.length||infs.length)?'<div class="notifsec">Jobs due</div>':'')+items.map(notifCardHtml).join("") : "";
+    if(!items.length && !lows.length && !tshs.length && !vlow.length && infs.length){ /* only other-info */ }
+    view.innerHTML=lowHtml+vanHtml+tshHtml+infHtml+jobHtml;
+    Array.prototype.forEach.call(view.querySelectorAll("[data-infnotif]"), function(c){
+      c.onclick=function(){ el("notifPanel").hidden=true; showTab("otherinfo"); };
+    });
     Array.prototype.forEach.call(view.querySelectorAll("[data-vannotif]"), function(c){
       c.onclick=function(){ el("notifPanel").hidden=true; F("vans").st="low"; fsave(); showTab("vans"); };
     });
@@ -4252,6 +4382,7 @@
   el("tabVans").onclick=function(){ showTab("vans"); };
   el("tabErrors").onclick=function(){ showTab("errors"); };
   el("tabTroubleshoots").onclick=function(){ showTab("troubleshoots"); };
+  el("tabOtherInfo").onclick=function(){ showTab("otherinfo"); };
   el("bellBtn").onclick=function(ev){
     ev.stopPropagation();
     var p=el("notifPanel");
@@ -4266,7 +4397,7 @@
 
   /* ---------- settings wiring ---------- */
   function openModal(){
-    el("cfgApi").value=cfg.apiUrl||""; el("cfgUrl").value=cfg.url; el("cfgSecs").value=cfg.secs; el("cfgHook").value=cfg.delHook||""; el("cfgErrUrl").value=cfg.errUrl||""; el("cfgStockUrl").value=cfg.stockUrl||""; el("cfgNotify").value=cfg.notifyHook||""; el("cfgFlowUrl").value=cfg.flowUrl||""; el("cfgSortlyUrl").value=cfg.sortlyUrl||""; el("cfgQtyUrl").value=cfg.qtyUrl||"";
+    el("cfgApi").value=APP ? "Built in — this app" : (cfg.apiUrl||""); el("cfgApi").disabled=APP; el("cfgUrl").value=cfg.url; el("cfgSecs").value=cfg.secs; el("cfgHook").value=cfg.delHook||""; el("cfgErrUrl").value=cfg.errUrl||""; el("cfgStockUrl").value=cfg.stockUrl||""; el("cfgNotify").value=cfg.notifyHook||""; el("cfgFlowUrl").value=cfg.flowUrl||""; el("cfgSortlyUrl").value=cfg.sortlyUrl||""; el("cfgQtyUrl").value=cfg.qtyUrl||"";
     var n=hiddenCount();
     el("cfgRestore").textContent = n ? ("Restore hidden jobs ("+n+")") : "Restore hidden jobs";
     el("cfgRestore").disabled = !n;
@@ -4308,7 +4439,7 @@
   el("setupDemo").onclick=demo;
   el("cfgDemo").onclick=function(){ closeModal(); demo(); };
   el("cfgSave").onclick=async function(){
-    cfg.apiUrl=el("cfgApi").value.trim();
+    cfg.apiUrl=APP ? "app" : el("cfgApi").value.trim();
     cfg.url=el("cfgUrl").value.trim();
     cfg.secs=parseInt(el("cfgSecs").value,10)||60;
     cfg.delHook=el("cfgHook").value.trim();
@@ -4328,6 +4459,35 @@
 
   /* ---------- boot ---------- */
   function sessionGet(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
+  // the app's sign-in: your name + the shared password. The server sets a cookie for 30 days.
+  var loginOpen=false;
+  function showLogin(onOk){
+    if(loginOpen) return; loginOpen=true;
+    var ov=document.createElement("div");
+    ov.style.cssText="position:fixed;inset:0;z-index:300;display:grid;place-items:center;background:var(--surface);padding:20px";
+    ov.innerHTML='<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;max-width:340px;width:100%;text-align:center">'
+      +'<div style="font-size:18px;font-weight:700;margin-bottom:6px">Plug In Dashboard</div>'
+      +'<div style="font-size:13px;color:var(--muted);margin-bottom:16px">Sign in to continue</div>'
+      +'<select id="__who" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;background:var(--panel);color:var(--ink);margin-bottom:8px">'
+      +PEOPLE.map(function(p){ return '<option'+(canon(p)===canon(cfg.userName||"")?' selected':'')+'>'+esc(p)+'</option>'; }).join("")+'</select>'
+      +'<input id="__pw" type="password" placeholder="Password" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;background:var(--panel);color:var(--ink)"/>'
+      +'<div id="__pwmsg" style="color:var(--urgent);font-size:12px;min-height:16px;margin:8px 0 2px"></div>'
+      +'<button id="__pwbtn" class="primary" style="width:100%">Sign in</button></div>';
+    document.body.appendChild(ov);
+    var who=ov.querySelector("#__who"), pw=ov.querySelector("#__pw"), btn=ov.querySelector("#__pwbtn"), msg=ov.querySelector("#__pwmsg");
+    function go(){
+      btn.disabled=true; msg.textContent="";
+      fetch("/auth/login", { method:"POST", credentials:"same-origin", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name: who.value, password: pw.value }) })
+        .then(function(r){ return r.json(); }).then(function(d){
+          btn.disabled=false;
+          if(!d.ok){ msg.textContent=d.error||"Wrong password"; pw.value=""; pw.focus(); return; }
+          cfg.userName=d.name||who.value; sSet("config", cfg);
+          loginOpen=false; ov.parentNode&&ov.parentNode.removeChild(ov);
+          if(onOk) onOk(); else fetchData(true);
+        }).catch(function(){ btn.disabled=false; msg.textContent="Couldn\u2019t reach the app"; });
+    }
+    btn.onclick=go; pw.onkeydown=function(e){ if(e.key==="Enter") go(); }; pw.focus();
+  }
   function showGate(pass, onOk){
     var ov=document.createElement("div");
     ov.style.cssText="position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:var(--surface);padding:20px";
@@ -4353,6 +4513,8 @@
     var DEF = (typeof window!=="undefined" && window.PIB_CONFIG) ? window.PIB_CONFIG : {};
     // URLs from config.js win (so a new laptop needs no setup, and changing config.js propagates)
     ["apiUrl","url","errUrl","delHook"].forEach(function(k){ if(DEF[k]) cfg[k]=DEF[k]; });
+    // in the app there is one data source, and no sheet / Zapier hooks
+    if(APP){ cfg.apiUrl="app"; cfg.delHook=""; cfg.url=""; cfg.errUrl=""; cfg.stockUrl=""; cfg.flowUrl=""; cfg.sortlyUrl=""; cfg.qtyUrl=""; cfg.tasksUrl=""; cfg.notifyHook=""; }
     if(DEF.secs && !c) cfg.secs=DEF.secs;
     applyTheme(cfg.theme || "dark");
     var s = await sGet("statuses"); if(s) statuses=s;
@@ -4366,6 +4528,14 @@
       render();
       if(cfg.apiUrl){ loop(); fetchData(true); fetchLevels(false); fetchVans(false); }
       else if(cfg.url || cfg.errUrl || cfg.stockUrl || cfg.flowUrl || cfg.sortlyUrl || cfg.qtyUrl){ loop(); refreshAll(true); }
+    }
+    if(APP){
+      fetch("/auth/me", { credentials:"same-origin", cache:"no-store" }).then(function(r){ return r.json(); }).then(function(me){
+        if(me.people && me.people.length) PEOPLE = me.people;
+        if(me.ok){ if(me.name) cfg.userName = me.name; startBoard(); }
+        else showLogin(startBoard);
+      }).catch(function(){ showLogin(startBoard); });
+      return;
     }
     var pass = DEF.passcode || "";
     if(pass && sessionGet("pib_unlock")!==pass) showGate(pass, startBoard);
