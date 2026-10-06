@@ -265,6 +265,41 @@
   .tshdot{color:var(--pending);flex:0 0 auto;margin-top:1px}
   .card.tshcard.s-pending{border-left-color:var(--pending)}
   .card.tshcard.s-actioned{opacity:.6}
+  /* troubleshoots: what it is + is it done */
+  .tshbrand{font-size:15px;font-weight:700;color:var(--ink);line-height:1.25}
+  .tshbrand small{display:block;font-size:12.5px;font-weight:500;color:var(--muted);margin-top:2px}
+  .tshdone{margin:10px 0 4px;padding:8px 10px;border-radius:8px;font-size:12.5px;line-height:1.4}
+  .tshdone b{display:block;font-size:13px;margin-bottom:1px}
+  .tshdone.ok{background:var(--actioned-soft);color:var(--actioned)}
+  .tshdone.todo{background:var(--urgent-soft);color:var(--urgent)}
+  .tshdone.wait{background:var(--pending-soft);color:var(--pending)}
+  .tshdone.none{background:var(--surface);color:var(--muted);border:1px solid var(--line)}
+  .tshdone .sub{color:var(--muted);font-size:12px;margin-top:3px}
+  .tshrows a{color:var(--live);font-weight:600}
+  /* Check tab */
+  .checkview{max-width:980px;margin:0 auto;padding:4px 16px 40px}
+  .chkhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:6px 0 14px}
+  .chkhead h2{margin:0;font-size:20px}
+  .chkhead .when{color:var(--faint);font-size:12.5px}
+  .chksec{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .chksec h3{margin:0 0 4px;font-size:15px}
+  .chksec .lead{margin:0 0 10px;color:var(--muted);font-size:12.5px}
+  .chktbl{width:100%;border-collapse:collapse;font-size:13px}
+  .chktbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:4px 8px 6px 0}
+  .chktbl td{padding:7px 8px 7px 0;border-top:1px solid var(--line);vertical-align:top}
+  .chktbl td.n,.chktbl th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .chkok{color:var(--actioned);font-weight:700} .chkbad{color:var(--urgent);font-weight:700}
+  .chklist{margin:6px 0 0;padding:0;list-style:none;font-size:12.5px}
+  .chklist li{padding:6px 0;border-top:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
+  .chklist li .who{font-weight:600;min-width:140px}
+  .chklist li .what{flex:1;min-width:0;overflow-wrap:anywhere;color:var(--muted)}
+  .chklist li button{flex:none}
+  .chkgrp{margin-top:12px}
+  .chkgrp>b{font-size:13px}
+  .chkprog{height:6px;background:var(--surface);border-radius:999px;overflow:hidden;margin:8px 0 4px}
+  .chkprog>i{display:block;height:100%;background:var(--live)}
+  .chkmini{font-size:12px;color:var(--faint)}
+  @media (max-width:640px){ .chklist li{flex-wrap:wrap} .chklist li .who{min-width:0} }
   .acctchip{display:inline-block;font-size:11px;font-weight:700;background:var(--pending-soft);color:var(--pending);padding:2px 9px;border-radius:999px;margin-bottom:7px;text-transform:uppercase;letter-spacing:.02em}
   .tshrows{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:12.5px;margin-bottom:10px}
   .tshrows span{color:var(--muted);font-weight:600}
@@ -612,6 +647,8 @@
   <button class="tab" data-tab="stock" id="tabStock">Stock <span class="tabbadge" id="stockBadge" hidden>0</span></button>
   <button class="tab" data-tab="troubleshoots" id="tabTroubleshoots">Troubleshoots <span class="tabbadge" id="tshBadge" hidden>0</span></button>
   <button class="tab" data-tab="errors" id="tabErrors">Errors <span class="tabbadge" id="errBadge" hidden>0</span></button>
+  <button class="tab" data-tab="otherinfo" id="tabOtherInfo">Other info <span class="tabbadge" id="infBadge" hidden>0</span></button>
+  <button class="tab" data-tab="check" id="tabCheck">Check <span class="tabbadge" id="chkBadge" hidden>0</span></button>
 </div>
 
 <div class="summary" id="summary" style="display:none"></div>
@@ -627,6 +664,8 @@
 <div class="stockview" id="stockview" style="display:none"></div>
 <div class="tshview" id="tshview" style="display:none"></div>
 <div class="errview" id="errview" style="display:none"></div>
+<div class="tshview" id="infview" style="display:none"></div>
+<div class="checkview" id="checkview" style="display:none"></div>
 <div id="printarea"></div>
 
 <!-- notifications dropdown (opened by the bell) -->
@@ -780,7 +819,8 @@
   var flowRaw = [], sortlyIdx = {}, qtyIdx = {};
   var flowState="", flowCount=0;
   var tasks = [];             // shared task board (ids prefixed "tsk::")
-  var troubleshoots = [];     // non-Ohme key-account troubleshoots (ids prefixed "tsh::")
+  var troubleshoots = [];     // key-account troubleshoots ("tsh::") + Ohme RMA renames from the Troubleshoots tab ("tsh::o::")
+  var otherInfo = [];         // Connecteam "Any Other Info" submissions ("inf::")
   var tshState = "";
   var taskWeek = null;        // Monday of the displayed week
   var currentTab = "board";
@@ -1149,13 +1189,14 @@
   function isFlwId(id){ return String(id).indexOf("flw::")===0; }
   function isTaskId(id){ return String(id).indexOf("tsk::")===0; }
   function isTshId(id){ return String(id).indexOf("tsh::")===0; }
-  function typeOf(id){ return isTshId(id)?"ts":(isErrId(id)?"error":(isStkId(id)?"stock":(isFlwId(id)?"flow":(isTaskId(id)?"task":"job")))); }
+  function isInfId(id){ return String(id).indexOf("inf::")===0; }
+  function typeOf(id){ return isTshId(id)?(String(id).indexOf("tsh::o::")===0?"tso":"ts"):isInfId(id)?"info":(isErrId(id)?"error":(isStkId(id)?"stock":(isFlwId(id)?"flow":(isTaskId(id)?"task":"job")))); }
   function findItem(id){
-    var arr = isTshId(id)?troubleshoots:(isErrId(id)?errors:(isStkId(id)?stock:(isFlwId(id)?flow:(isTaskId(id)?tasks:shifts))));
+    var arr = isInfId(id)?otherInfo:isTshId(id)?troubleshoots:(isErrId(id)?errors:(isStkId(id)?stock:(isFlwId(id)?flow:(isTaskId(id)?tasks:shifts))));
     for(var i=0;i<arr.length;i++){ if(arr[i].id===id) return arr[i]; }
     return null;
   }
-  function matchFor(it,id){ if(isTshId(id)) return tshMatch(it); return isErrId(id)? errMatch(it) : (isStkId(id)? stockMatch(it) : (isFlwId(id)? flowMatch(it) : (isTaskId(id)? taskMatch(it) : jobMatch(it)))); }
+  function matchFor(it,id){ if(isInfId(id)) return infMatch(it); if(isTshId(id)) return tshMatch(it); return isErrId(id)? errMatch(it) : (isStkId(id)? stockMatch(it) : (isFlwId(id)? flowMatch(it) : (isTaskId(id)? taskMatch(it) : jobMatch(it)))); }
   function writeUrl(){ return cfg.apiUrl || cfg.delHook; }
   function apiPost(fields){
     var target = writeUrl(); if(!target) return;
@@ -1185,7 +1226,7 @@
     jsonp(cfg.apiUrl, params, function(err,data){ if(cb) cb(err,data); });
   }
   function absorbStatuses(){
-    shifts.concat(errors).concat(stock).concat(flow).concat(tasks).concat(troubleshoots).forEach(function(it){
+    shifts.concat(errors).concat(stock).concat(flow).concat(tasks).concat(troubleshoots).concat(otherInfo).forEach(function(it){
       var row=buildRow(it._raw||{});
       var st=pick(row, STATUS_HDRS), nt=pick(row, NOTE_HDRS), ct=pick(row, CTYPE_HDRS);
       if(st){ statuses[it.id]=statuses[it.id]||{}; statuses[it.id].status = (String(it.id).indexOf("tsk::")===0) ? canonTaskStatus(st) : canonStatus(st); }
@@ -1217,7 +1258,8 @@
       tasks = toTasks(data.tasks||[]);
       // older Code.gs builds don't send this key at all — tell the tab so it can say "redeploy"
       if(data.troubleshoots===undefined){ troubleshoots=[]; tshState="olddeploy"; }
-      else { troubleshoots = toTroubleshoots(data.troubleshoots); tshState="ok"; }
+      else { troubleshoots = toTroubleshoots(data.troubleshoots).concat(toOhmeTroubleshoots(data.ohmetroubleshoots||[])); tshState="ok"; }
+      otherInfo = toOtherInfo(data.otherinfo||[]);
       mergeFlow();
       errState="ok"; errCount=(data.errors||[]).length; errLooksLikeJobs=false;
       stockState="ok"; stockCount=(data.stock||[]).length;
@@ -1379,7 +1421,7 @@
     var type=typeOf(id);
     var item=findItem(id);
     var match = item ? JSON.stringify(matchFor(item,id)) : null;
-    var noun = type==="ts"?"troubleshoot":type==="error"?"error":(type==="stock"?"stock alert":(type==="flow"?"automation run":"job"));
+    var noun = (type==="ts"||type==="tso")?"troubleshoot":type==="info"?"Other info card":type==="error"?"error":(type==="stock"?"stock alert":(type==="flow"?"automation run":"job"));
     // the linked flow run's charger tick is re-synced AFTER the confirm, never before it,
     // so cancelling the dialog doesn't quietly change the Flow tab for everyone
     var linkSerial = ((type==="error"||type==="stock") && item && item.serial) ? item.serial : "";
@@ -1389,7 +1431,8 @@
       if(type==="error") errors=errors.filter(function(x){return x.id!==id;});
       else if(type==="stock") stock=stock.filter(function(x){return x.id!==id;});
       else if(type==="flow") flow=flow.filter(function(x){return x.id!==id;});
-      else if(type==="ts") troubleshoots=troubleshoots.filter(function(x){return x.id!==id;});
+      else if(type==="ts" || type==="tso") troubleshoots=troubleshoots.filter(function(x){return x.id!==id;});
+      else if(type==="info") otherInfo=otherInfo.filter(function(x){return x.id!==id;});
       else shifts=shifts.filter(function(x){return x.id!==id;});
       if(linkSerial) await syncFlowChargerSorted(linkSerial);
       closeDetail(); render();
@@ -1733,6 +1776,8 @@
     renderFlow();
     renderCalendar();
     renderTroubleshoots();
+    renderOtherInfo();
+    renderCheck();
     renderNotifications();
     renderTabs();
     applyTabVisibility();
@@ -1909,6 +1954,8 @@
     el("vanview").style.display = t==="vans"?"block":"none";
     el("errview").style.display  = t==="errors"?"block":"none";
     el("tshview").style.display  = t==="troubleshoots"?"block":"none";
+    el("infview").style.display  = t==="otherinfo"?"block":"none";
+    el("checkview").style.display = t==="check"?"block":"none";
   }
 
   function showTab(t){ currentTab=t; render(); if(t==="orders") renderOrders(); }
@@ -3472,6 +3519,53 @@
     return out;
   }
   function tshMatch(t){ return (t && t.ts_id) ? { troubleshoot_id:t.ts_id } : stableRaw(t && t._raw, TSMAP.when); }
+  // Ohme troubleshoots: the Trouubleshoot Zap renames the new charger to the RMA and logs a row on the
+  // "Troubleshoots" tab (when, engineer, serial, charger_found, previous_name, renamed_to). Last 30 days.
+  function toOhmeTroubleshoots(rows){
+    var out=[], seen={};
+    (rows||[]).forEach(function(raw){
+      var t=normTs(raw);
+      if(!t.serial && !t.engineer) return;
+      if(t.when && (Date.now()-tms(t.when)) > 30*86400000) return;
+      t.key_account="Ohme"; t.ohme=true;
+      var row=buildRow(raw);
+      t.previous_name=pick(row,["previous_name","previous name","charger_name"]);
+      t.renamed_to=pick(row,["renamed_to","renamed to","rma"]);
+      t.charger_found=pick(row,["charger_found","charger found","found"]);
+      t.id="tsh::o::"+contentKey(raw);
+      if(seen[t.id]) return; seen[t.id]=1; out.push(t);
+      // a clean rename is done already — only problems (not found / no RMA) start open; the sheet's own status wins
+      var ok = !/^no$/i.test(String(t.charger_found||"").trim()) && !/no rma found|not renamed/i.test(t.renamed_to||"") && t.renamed_to;
+      if(ok && !(statuses[t.id] && statuses[t.id].status)){ statuses[t.id]=statuses[t.id]||{}; statuses[t.id].status="actioned"; }
+    });
+    return out;
+  }
+  function tshBrand(t){
+    var s=[t.key_account, t.previous_name, t.renamed_to].join(" ");
+    if(/hyper\s*volt/i.test(s)) return "Hypervolt";
+    if(/evec/i.test(s)) return "EVEC";
+    if(t.ohme || /ohme/i.test(s)) return "Ohme";
+    return t.key_account || "Troubleshoot";
+  }
+  function tshRma(t){ var m=String(t.renamed_to||"").match(/uk\s*\d{5,}/i); return m?m[0].replace(/\s+/g,"").toUpperCase():""; }
+  function tshTitle(t){
+    var b=tshBrand(t);
+    if(b==="Ohme"){ var r=tshRma(t); return { main:"Ohme — faulty charger swapped", sub: r ? "RMA "+r : (/no rma/i.test(t.renamed_to||"") ? "No RMA number given" : "") }; }
+    if(b==="Hypervolt"||b==="EVEC") return { main:b+" — faulty charger swapped", sub:"Coming back to us — collect it from the customer’s address" };
+    return { main:b+" troubleshoot", sub:"" };
+  }
+  // is the Sortly side done? The Check tab knows for sure; otherwise say what the Zap logged
+  function tshDone(t){
+    var c=checkFor(t.ohme?"tso":"ts", t.serial, t.engineer), b=tshBrand(t);
+    if(c && c.verdict==="sorted") return { cls:"ok", head:"✓ Done in Sortly", text:esc(c.detail) };
+    if(c && c.verdict==="todo") return { cls:"todo", head:"✗ Not done in Sortly yet", text:esc(c.detail) };
+    if(t.ohme){
+      if(/^no$/i.test(String(t.charger_found||"").trim())) return { cls:"todo", head:"✗ Not renamed", text:"The Zap couldn’t find the new charger "+esc(t.serial||"")+" in the van — rename it by hand." };
+      if(/no rma found|not renamed/i.test(t.renamed_to||"")) return { cls:"todo", head:"✗ No RMA yet", text:"Renamed “NO RMA FOUND” — put the RMA on it once Ohme send one." };
+      return { cls:"wait", head:"Renamed by the Zap", text:(t.previous_name?"“"+esc(t.previous_name)+"” → ":"")+esc(t.renamed_to||"")+". Run the Check tab to confirm it’s the right charger." };
+    }
+    return { cls:"wait", head:"Not done yet", text:"Nothing renames "+esc(b)+" chargers in Sortly automatically — rename it by hand with the job details." };
+  }
   function openTroubleshoots(){
     return troubleshoots.filter(function(t){ return !isHidden(t.id) && statusOf(t.id)!=="actioned"; })
       .sort(function(a,b){ return tms(b.when)-tms(a.when); });
@@ -3484,11 +3578,13 @@
   }
   function tshCardHtml(t){
     var st=statusOf(t.id), blk=(statuses[t.id]&&statuses[t.id].blocker)||"";
+    var tt=tshTitle(t), dn=tshDone(t);
     function seg(v){ return '<button data-id="'+esc(t.id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+TSH_LABEL[v]+'</button>'; }
     var rows='<div class="tshrows">'+
       '<span>Serial</span><div class="sn">'+(t.serial?esc(t.serial)+'<button class="copybtn" data-copy="'+esc(t.serial)+'">Copy</button>':'<i style="color:var(--faint)">not given</i>')+'</div>'+
-      '<span>Customer</span><div>'+esc(t.customer||"—")+'</div>'+
-      '<span>Address</span><div>'+esc(t.address||"—")+'</div>'+
+      (t.ohme && !t.customer ? '' : '<span>Customer</span><div>'+esc(t.customer||"—")+'</div>')+
+      (t.ohme && !t.address ? '' : '<span>Address</span><div>'+esc(t.address||"—")+'</div>')+
+      (t.ohme && t.previous_name ? '<span>Was</span><div>'+esc(t.previous_name)+'</div>' : '')+
       '</div>';
     var meta="";
     if(t.when) meta+='<span class="m">'+ICON.clock+esc(fmtTime(t.when))+'</span>';
@@ -3496,8 +3592,9 @@
     return '<div class="card tshcard s-'+st+'" data-id="'+esc(t.id)+'">'+
       '<button class="carddel" data-del="'+esc(t.id)+'" title="Delete from the sheet">×</button>'+
       '<div class="card-body" data-open="'+esc(t.id)+'">'+
-        '<span class="acctchip">'+esc(t.key_account||"Key account")+'</span>'+
-        '<div class="title"><span class="tshdot">'+ICON.alert+'</span><span>'+esc(t.customer||"Troubleshoot")+'</span></div>'+
+        '<span class="acctchip">'+esc(tshBrand(t))+'</span>'+
+        '<div class="tshbrand">'+esc(tt.main)+(tt.sub?'<small>'+esc(tt.sub)+'</small>':'')+'</div>'+
+        '<div class="tshdone '+dn.cls+'"><b>'+dn.head+'</b>'+dn.text+'</div>'+
         rows+
         (meta?'<div class="meta">'+meta+'</div>':'')+
         (t.issue?'<div class="cardnote">'+esc(t.issue)+'</div>':'')+
@@ -3526,6 +3623,140 @@
     if(fv(k,"sn")==="1" && !t.serial) return false;
     return matchQ(t, fv(k,"q"));
   }
+  /* =========================================================================
+     ANY OTHER INFO — the Connecteam "Any Other Info" workflow. A Zap writes each one to the
+     "Other Info" tab; it shows here and on the bell until someone marks it Seen.
+     ========================================================================= */
+  var INF_LABEL = { pending:"New", actioned:"Seen" };
+  var INF_SKIP = /^(status|note|notes|submission_id|when)$/i;
+  function toOtherInfo(rows){
+    var out=[];
+    (rows||[]).forEach(function(raw){
+      var row=buildRow(raw);
+      var x={ _raw:raw, when:pick(row,["when","date"]), engineer:pick(row,["engineer","submitted_by"]), sid:pick(row,["submission_id"]) };
+      if(!x.engineer && !x.sid) return;
+      x.id="inf::"+(x.sid||contentKey(raw));
+      out.push(x);
+    });
+    return out;
+  }
+  function infMatch(x){ return x && x.sid ? { submission_id:x.sid } : stableRaw(x && x._raw, ["when"]); }
+  function openOtherInfo(){ return otherInfo.filter(function(x){ return statusOf(x.id)!=="actioned"; }); }
+  function infCardHtml(x){
+    var st=statusOf(x.id)==="actioned"?"actioned":"pending", blk=(statuses[x.id]&&statuses[x.id].blocker)||"";
+    var rows=Object.keys(x._raw||{}).filter(function(k){ var v=String(x._raw[k]||"").trim(); return v && !INF_SKIP.test(k.trim()) && !/^engineer$/i.test(k.trim()) && !/^no answer provided$/i.test(v); }).map(function(k){
+      var v=String(x._raw[k]).trim();
+      var links=v.match(/https?:\/\/\S+/g);
+      var shown = links ? links.map(function(u,i){ return '<a href="'+esc(u)+'" target="_blank" rel="noopener">photo '+(i+1)+'</a>'; }).join(" · ") : esc(v);
+      return '<span>'+esc(k.replace(/_/g," "))+'</span><div>'+shown+'</div>';
+    }).join("");
+    function seg(v){ return '<button data-id="'+esc(x.id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+INF_LABEL[v]+'</button>'; }
+    return '<div class="card tshcard s-'+st+'" data-id="'+esc(x.id)+'">'+
+      '<button class="carddel" data-del="'+esc(x.id)+'" title="Delete from the sheet">×</button>'+
+      '<div class="card-body">'+
+        '<span class="acctchip">Any Other Info</span>'+
+        '<div class="tshbrand">'+esc(x.engineer||"Engineer")+(x.when?'<small>'+esc(fmtTime(x.when))+'</small>':'')+'</div>'+
+        '<div class="tshrows">'+rows+'</div>'+
+      '</div>'+
+      '<div class="seg">'+seg("pending")+seg("actioned")+'</div>'+
+      '<div class="blocker"><input name="note" data-id="'+esc(x.id)+'" placeholder="Note" value="'+esc(blk)+'" /></div>'+
+      '</div>';
+  }
+  function renderOtherInfo(){
+    var view=el("infview"); if(!view) return;
+    var b=el("infBadge"), n=openOtherInfo().length; if(b){ b.textContent=n; b.hidden=!n; }
+    if(currentTab!=="otherinfo") return;
+    var list=otherInfo.slice().sort(function(a,b){ return (statusOf(a.id)==="actioned")-(statusOf(b.id)==="actioned") || tms(b.when)-tms(a.when); });
+    if(!list.length){ view.innerHTML='<div class="stockempty"><b>Nothing from Any Other Info yet.</b><br>Every time an engineer submits the Any Other Info workflow it lands here until someone marks it Seen.</div>'; return; }
+    view.innerHTML='<div class="stockgrid">'+list.map(infCardHtml).join("")+'</div>';
+    wireCards(view);
+  }
+
+  /* =========================================================================
+     CHECK — what's still open, and is it really done in Sortly? The Apps Script reads each
+     engineer's Sortly folder (and the warehouse) — one engineer per call.
+     ========================================================================= */
+  var chk = { running:false, at:null, eng:{}, engList:[], done:0, error:"" };
+  function chkKey(s){ return String(s||"").replace(/https?:\/\/\S+/g,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+  function checkFor(type, serial, engineer){
+    var k=chkKey(serial); if(!k) return null;
+    for(var n in chk.eng){ var e=chk.eng[n]; if(!e || !e.checks) continue;
+      if(engineer && canon(e.engineer)!==canon(engineer) && canon(n)!==canon(engineer)) continue;
+      for(var i=0;i<e.checks.length;i++){ var c=e.checks[i]; if(c.type===type && chkKey(c.serial)===k) return c; } }
+    return null;
+  }
+  function cardFor(c){
+    var arr = c.type==="stock"?stock:(c.type==="error"?errors:troubleshoots), k=chkKey(c.serial);
+    for(var i=0;i<arr.length;i++){
+      var it=arr[i]; if(statusOf(it.id)==="actioned") continue;
+      if(c.type==="tso" && !it.ohme) continue; if(c.type==="ts" && it.ohme) continue;
+      if(chkKey(String(it.serial||"").split(/\s+/)[0])===k) return it.id;
+    }
+    return null;
+  }
+  function jsonpP(params, ms){ return new Promise(function(res){ jsonp(cfg.apiUrl, params, function(err,data){ res(err?{ ok:false, error:err.message }:data); }, ms); }); }
+  function openEngineers(){
+    var set={};
+    stock.concat(errors).concat(troubleshoots).forEach(function(it){ if(statusOf(it.id)!=="actioned" && it.engineer) set[it.engineer]=1; });
+    return Object.keys(set).sort();
+  }
+  async function runCheck(){
+    if(chk.running) return;
+    if(!cfg.apiUrl){ chk.error="The Check needs the Live API URL (Settings)."; renderCheck(); return; }
+    chk.running=true; chk.error=""; chk.eng={}; chk.done=0; chk.engList=openEngineers(); renderCheck();
+    for(var i=0;i<chk.engList.length;i++){
+      var n=chk.engList[i];
+      chk.eng[n]=await jsonpP({ action:"checkengineer", name:n }, 120000);
+      if(chk.eng[n] && chk.eng[n].error==="unknown action: checkengineer") { chk.error="The live Apps Script hasn’t got the Check yet — paste the new Code.gs and deploy a new version."; break; }
+      chk.done=i+1; renderCheck(); renderTroubleshoots();
+    }
+    chk.at=new Date(); chk.running=false; render();
+  }
+  async function tickSorted(list){
+    for(var i=0;i<list.length;i++){ var id=cardFor(list[i]); if(id && statusOf(id)!=="actioned") await setStatus(id,"actioned"); }
+    render();
+  }
+  var CHK_TYPE = { stock:"Stock alert", error:"Error", tso:"Ohme troubleshoot", ts:"Troubleshoot" };
+  function renderCheck(){
+    var view=el("checkview"); if(!view) return;
+    var todo=[], sorted=[], unk=[], fails=[], seenEng={};
+    Object.keys(chk.eng).forEach(function(n){
+      var e=chk.eng[n];
+      if(!e || !e.ok){ fails.push({ who:n, what:(e&&e.error)||"couldn’t check" }); return; }
+      if(seenEng[e.engineer]) return; seenEng[e.engineer]=1;
+      (e.checks||[]).forEach(function(c){ c.who=e.engineer; (c.verdict==="todo"?todo:(c.verdict==="sorted"?sorted:unk)).push(c); });
+    });
+    var b=el("chkBadge"); if(b){ b.textContent=todo.length; b.hidden=!todo.length; }
+    if(currentTab!=="check") return;
+    var h='<div class="chkhead"><h2>Check</h2><button class="primary" id="chkRun"'+(chk.running?" disabled":"")+'>'+(chk.running?"Checking…":"Run the check")+'</button>'+
+      (chk.at?'<span class="when">Last run '+esc(fmtTime(chk.at.toISOString()))+'</span>':'')+'</div>';
+    if(chk.error) h+='<div class="chksec"><span class="chkbad">'+esc(chk.error)+'</span></div>';
+    // 1. still open
+    function cnt(list, fn){ var o=0,u=0; list.forEach(function(it){ var s=statusOf(it.id); if(s!=="actioned"){ o++; if(s==="urgent") u++; } }); return { open:o, urgent:u, total:list.length }; }
+    var lists=[["Jobs",shifts],["Errors",errors],["Stock",stock],["Flow",flow],["Troubleshoots",troubleshoots],["Other info",otherInfo]];
+    h+='<div class="chksec"><h3>1. Still open on the board</h3><p class="lead">Cards nobody has ticked off yet.</p><table class="chktbl"><tr><th>List</th><th class="n">Open</th><th class="n">Flagged</th><th class="n">All cards</th></tr>'+
+      lists.map(function(l){ var c=cnt(l[1]); return '<tr><td>'+l[0]+'</td><td class="n">'+(c.open?'<b>'+c.open+'</b>':'<span class="chkok">0</span>')+'</td><td class="n">'+(c.urgent||"")+'</td><td class="n">'+c.total+'</td></tr>'; }).join("")+'</table></div>';
+    // 2. Sortly
+    var tot=chk.engList.length;
+    h+='<div class="chksec"><h3>2. Is it really done in Sortly?</h3><p class="lead">Every open stock alert, error and troubleshoot, checked against the engineer’s Sortly folder and the warehouse: is the charger still there, was the right one renamed.</p>';
+    if(chk.running && tot) h+='<div class="chkmini">Checking engineer '+Math.min(chk.done+1,tot)+' of '+tot+'…</div><div class="chkprog"><i style="width:'+Math.round(100*chk.done/tot)+'%"></i></div>';
+    function li(c){ var cid=cardFor(c); return '<li><span class="who">'+esc(c.who)+'</span><span class="what"><b>'+esc(CHK_TYPE[c.type]||c.type)+'</b>'+(c.serial?' · '+esc(c.serial):'')+' — '+esc(c.detail)+'</span>'+(cid?'<button class="ghost" data-chkopen="'+esc(cid)+'">Open</button>':'')+'</li>'; }
+    if(chk.done){
+      h+='<div class="chkgrp"><b class="chkbad">Needs doing ('+todo.length+')</b>'+(todo.length?'<ul class="chklist">'+todo.map(li).join("")+'</ul>':'<div class="chkmini">Nothing — everything open has been done in Sortly.</div>')+'</div>';
+      var flagged=sorted.filter(function(c){ var id=cardFor(c); return id && statusOf(id)==="urgent"; }), plain=sorted.filter(function(c){ return flagged.indexOf(c)<0; });
+      h+='<div class="chkgrp"><b class="chkok">Nothing left to do in Sortly ('+sorted.length+')</b>'+(plain.length?' <button class="ghost" id="chkTick">Tick off '+plain.length+'</button>':'')+
+        (flagged.length?'<div class="chkmini">'+flagged.length+' of these are flagged “Wrong charger type” — they stay open for the Plug In stock move, so they aren’t ticked off here.</div>':'')+
+        (sorted.length?'<ul class="chklist">'+sorted.map(li).join("")+'</ul>':'')+'</div>';
+      if(unk.length) h+='<div class="chkgrp"><b>Couldn’t tell — check by hand ('+unk.length+')</b><ul class="chklist">'+unk.map(li).join("")+'</ul></div>';
+      if(fails.length) h+='<div class="chkgrp"><b class="chkbad">Couldn’t check ('+fails.length+')</b><ul class="chklist">'+fails.map(function(f){ return '<li><span class="who">'+esc(f.who)+'</span><span class="what">'+esc(f.what)+'</span></li>'; }).join("")+'</ul></div>';
+    } else if(!chk.running) h+='<div class="chkmini">Not run yet — press “Run the check”. It takes a few seconds per engineer.</div>';
+    h+='</div>';
+    view.innerHTML=h;
+    var rb=el("chkRun"); if(rb) rb.onclick=function(){ runCheck(); };
+    var tb=el("chkTick"); if(tb) tb.onclick=function(){ tb.disabled=true; tb.textContent="Ticking off…"; tickSorted(sorted.filter(function(c){ var id=cardFor(c); return !(id && statusOf(id)==="urgent"); })); };
+    Array.prototype.forEach.call(view.querySelectorAll("[data-chkopen]"), function(x){ x.onclick=function(){ openDetail(x.getAttribute("data-chkopen")); }; });
+  }
+
   function renderTroubleshoots(){
     var view=el("tshview"); if(!view) return;
     var pool=troubleshoots.filter(function(t){ return !isHidden(t.id); });
@@ -3559,10 +3790,12 @@
   function openTshDetail(id){
     var t=findItem(id); if(!t) return;
     var st=statusOf(id), blk=(statuses[id]&&statuses[id].blocker)||"";
-    el("detailTitle").firstChild.textContent=(t.key_account||"Troubleshoot")+" troubleshoot ";
+    el("detailTitle").firstChild.textContent=tshTitle(t).main+" ";
     function seg(v){ return '<button data-id="'+esc(id)+'" data-s="'+v+'" class="'+(st===v?"on":"")+'">'+TSH_LABEL[v]+'</button>'; }
     var html='<div class="seg dstatus">'+seg("pending")+seg("urgent")+seg("actioned")+'</div>';
-    html+=drow("Serial", t.serial)+drow("Old serial", t.old_serial)+drow("Customer", t.customer)+drow("Address", t.address);
+    var dn=tshDone(t);
+    html+='<div class="tshdone '+dn.cls+'"><b>'+dn.head+'</b>'+dn.text+'</div>';
+    html+=drow("New charger serial", t.serial)+drow("Old serial", t.old_serial)+drow("Customer", t.customer)+drow("Address", t.address)+(t.ohme?drow("Was called", t.previous_name)+drow("Renamed to", t.renamed_to):"");
     html+='<button class="ghost" id="tshCopyAll" style="margin:10px 0 4px;width:100%">Copy serial, customer and address</button>';
     html+='<div class="dsec">From the workflow</div>'+drow("Key account", t.key_account)+drow("Engineer", t.engineer)+drow("Submitted", t.when?fmtTime(t.when):"")+drow("Issue", t.issue);
     var extra="";
@@ -3977,6 +4210,7 @@
     if(id.indexOf("stk::")===0){ openStockDetail(id); return; }
     if(id.indexOf("flw::")===0){ openFlowDetail(id); return; }
     if(id.indexOf("tsh::")===0){ openTshDetail(id); return; }
+    if(id.indexOf("inf::")===0) return;            // Other info cards show everything on the card
     var s=null;
     for(var i=0;i<shifts.length;i++){ if(shifts[i].id===id){ s=shifts[i]; break; } }
     if(!s) return;
@@ -4251,6 +4485,8 @@
   el("tabLevels").onclick=function(){ showTab("levels"); };
   el("tabVans").onclick=function(){ showTab("vans"); };
   el("tabErrors").onclick=function(){ showTab("errors"); };
+  el("tabOtherInfo").onclick=function(){ showTab("otherinfo"); };
+  el("tabCheck").onclick=function(){ showTab("check"); if(!chk.at && !chk.running) runCheck(); };
   el("tabTroubleshoots").onclick=function(){ showTab("troubleshoots"); };
   el("bellBtn").onclick=function(ev){
     ev.stopPropagation();
