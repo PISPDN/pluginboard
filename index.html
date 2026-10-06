@@ -3507,11 +3507,15 @@
   };
   function normTs(raw){ var row=buildRow(raw); var o={}; Object.keys(TSMAP).forEach(function(f){ o[f]=pick(row,TSMAP[f]); }); o._raw=raw; return o; }
   function isOhme(t){ return /ohme/i.test(t.key_account||""); }
+  // only troubleshoots from this date on are shown (older ones were dealt with before the board tracked them)
+  var TSH_SINCE = Date.parse("2026-10-06T00:00:00+01:00");
+  function tshTooOld(t){ var w=t && t.when ? tms(t.when) : 0; return !!(w && w < TSH_SINCE); }
   function toTroubleshoots(rows){
     var out=[], byId={};
     (rows||[]).forEach(function(raw){
       var t=normTs(raw);
       if(!t.serial && !t.customer && !t.address && !t.key_account) return;
+      if(tshTooOld(t)) return;
       if(isOhme(t)) return;                        // Ohme runs through the RMA Zap, not here
       t.id="tsh::"+(t.ts_id || contentKey(raw));
       if(byId[t.id]!==undefined){ out[byId[t.id]]=t; } else { byId[t.id]=out.length; out.push(t); }
@@ -3526,17 +3530,18 @@
     (rows||[]).forEach(function(raw){
       var t=normTs(raw);
       if(!t.serial && !t.engineer) return;
-      if(t.when && (Date.now()-tms(t.when)) > 30*86400000) return;
+      if(!t.when || tshTooOld(t)) return;
       t.key_account="Ohme"; t.ohme=true;
       var row=buildRow(raw);
       t.previous_name=pick(row,["previous_name","previous name","charger_name"]);
       t.renamed_to=pick(row,["renamed_to","renamed to","rma"]);
       t.charger_found=pick(row,["charger_found","charger found","found"]);
       t.id="tsh::o::"+contentKey(raw);
+      // only problems are shown: the charger wasn't found, or it wasn't renamed (no RMA, or renamed "No answer provided…")
+      var found = !/^(no|false)$/i.test(String(t.charger_found||"").trim());
+      var renamedOk = t.renamed_to && !/no rma found|not renamed|no match|no answer provided/i.test(t.renamed_to);
+      if(found && renamedOk) return;
       if(seen[t.id]) return; seen[t.id]=1; out.push(t);
-      // a clean rename is done already — only problems (not found / no RMA) start open; the sheet's own status wins
-      var ok = !/^no$/i.test(String(t.charger_found||"").trim()) && !/no rma found|not renamed/i.test(t.renamed_to||"") && t.renamed_to;
-      if(ok && !(statuses[t.id] && statuses[t.id].status)){ statuses[t.id]=statuses[t.id]||{}; statuses[t.id].status="actioned"; }
     });
     return out;
   }
@@ -3724,7 +3729,12 @@
       var e=chk.eng[n];
       if(!e || !e.ok){ fails.push({ who:n, what:(e&&e.error)||"couldn’t check" }); return; }
       if(seenEng[e.engineer]) return; seenEng[e.engineer]=1;
-      (e.checks||[]).forEach(function(c){ c.who=e.engineer; (c.verdict==="todo"?todo:(c.verdict==="sorted"?sorted:unk)).push(c); });
+      (e.checks||[]).forEach(function(c){
+        c.who=e.engineer;
+        // troubleshoot results only for troubleshoots the board still shows (from TSH_SINCE on)
+        if((c.type==="tso"||c.type==="ts") && !troubleshoots.some(function(t){ return (t.ohme?"tso":"ts")===c.type && chkKey(t.serial)===chkKey(c.serial) && canon(t.engineer)===canon(e.engineer); })) return;
+        (c.verdict==="todo"?todo:(c.verdict==="sorted"?sorted:unk)).push(c);
+      });
     });
     var b=el("chkBadge"); if(b){ b.textContent=todo.length; b.hidden=!todo.length; }
     if(currentTab!=="check") return;
