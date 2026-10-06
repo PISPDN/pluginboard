@@ -3547,7 +3547,7 @@
     if(t.ohme || /ohme/i.test(s)) return "Ohme";
     return t.key_account || "Troubleshoot";
   }
-  function tshRma(t){ var m=String(t.renamed_to||"").match(/uk\s*\d{5,}/i); return m?m[0].replace(/\s+/g,"").toUpperCase():""; }
+  function tshRma(t){ var m=String(t.renamed_to||"").match(/uk\s*:?\s*\d{5,}/i); return m?m[0].replace(/[\s:]+/g,"").toUpperCase():""; }
   function tshTitle(t){
     var b=tshBrand(t);
     if(b==="Ohme"){ var r=tshRma(t); return { main:"Ohme — faulty charger swapped", sub: r ? "RMA "+r : (/no rma/i.test(t.renamed_to||"") ? "No RMA number given" : "") }; }
