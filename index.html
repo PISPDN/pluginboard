@@ -907,7 +907,7 @@
 
   var STAT = { pending:"pending", actioned:"actioned", urgent:"urgent" };
   var el = function(id){ return document.getElementById(id); };
-  var BUILD = "2026-10-22a · Board: one column per engineer (ScottMenzies = Scott Menzies)";
+  var BUILD = "2026-10-22b · Engineer filter: every monthly engineer listed + All monthly engineers";
 
   /* ---------- header normalisation ---------- */
   var MAP = {
@@ -1727,6 +1727,21 @@
     return [{ v:"", t: allLabel || "All" }].concat(values.map(function(v){ return { v:v, t:v }; }));
   }
 
+  // Engineers on monthly deliveries — always in the Board / Calendar engineer filter, even with no
+  // jobs on the board yet, plus an "All monthly engineers" option. Add new monthly engineers here.
+  var MONTHLY_ENGINEERS = ["Benjamin Cole","Brandon Hall","Ethan Heath-Mills","Jack Place","Jack Shearer",
+                           "Jake Reed","Nick Smith","Sam Day","Scott Menzies","Surinder Dhir"];
+  var MONTHLY_KEY = "@monthly";
+  function isMonthlyEngineer(n){ var k = canon(n); return MONTHLY_ENGINEERS.some(function(m){ return canon(m) === k; }); }
+  function jobEngOptions(list){
+    var names = uniq(list, function(s){ return s.engineer; }), seen = {};
+    names.forEach(function(n){ seen[canon(n)] = 1; });
+    MONTHLY_ENGINEERS.forEach(function(m){ if(!seen[canon(m)]){ seen[canon(m)] = 1; names.push(m); } });
+    names.sort(function(a,b){ return a.localeCompare(b); });
+    return [{ v:"", t:"All engineers" }, { v:MONTHLY_KEY, t:"All monthly engineers" }]
+      .concat(names.map(function(n){ return { v:n, t:n + (isMonthlyEngineer(n) ? "" : " (not monthly)") }; }));
+  }
+
   var DATE_FWD = [                                   // job dates — look forward
     {v:"",t:"Any date"},{v:"overdue",t:"Overdue"},{v:"today",t:"Today"},{v:"tomorrow",t:"Tomorrow"},
     {v:"next7",t:"Next 7 days"},{v:"week",t:"This week"},{v:"month",t:"This month"},{v:"nodate",t:"No date"}
@@ -1876,7 +1891,7 @@
   function jobSpecs(list){
     return [
       { key:"q", type:"search", placeholder:"Search jobs, customers, postcodes…" },
-      { key:"eng",  label:"Engineer", options:optList(uniq(list, function(s){ return s.engineer; }), "All engineers") },
+      { key:"eng",  label:"Engineer", options:jobEngOptions(list) },
       { key:"st",   label:"Status",   options:[{v:"",t:"All"},{v:"open",t:"Open (not done)"},{v:"pending",t:"Pending"},{v:"actioned",t:"Completed"},{v:"urgent",t:"Urgent"}] },
       { key:"loc",  label:"Location", options:optList(uniq(list, function(s){ return s.location; }), "Anywhere") },
       { key:"date", label:"Date",     options:DATE_FWD },
@@ -1887,7 +1902,8 @@
   }
   function jobPass(tab, s){
     var eng = fv(tab,"eng"), loc = fv(tab,"loc");
-    if(eng && canon(s.engineer) !== canon(eng)) return false;
+    if(eng === MONTHLY_KEY){ if(!isMonthlyEngineer(s.engineer)) return false; }
+    else if(eng && canon(s.engineer) !== canon(eng)) return false;
     if(loc && canon(s.location) !== canon(loc)) return false;
     if(!statusPass(s.id, fv(tab,"st"))) return false;
     if(!inRange(s.start, fv(tab,"date"))) return false;
@@ -2197,7 +2213,7 @@
     var calPool=shifts.filter(function(s){ return !isHidden(s.id); });
     var calSpecs=[
       { key:"q", type:"search", placeholder:"Search jobs…" },
-      { key:"eng",  label:"Engineer", options:optList(uniq(calPool, function(s){ return s.engineer; }), "All engineers") },
+      { key:"eng",  label:"Engineer", options:jobEngOptions(calPool) },
       { key:"st",   label:"Status",   options:[{v:"",t:"All"},{v:"open",t:"Open (not done)"},{v:"pending",t:"Pending"},{v:"actioned",t:"Completed"},{v:"urgent",t:"Urgent"}] },
       { key:"loc",  label:"Location", options:optList(uniq(calPool, function(s){ return s.location; }), "Anywhere") },
       { key:"note", type:"check", label:"Has a note" }
