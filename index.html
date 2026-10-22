@@ -907,7 +907,7 @@
 
   var STAT = { pending:"pending", actioned:"actioned", urgent:"urgent" };
   var el = function(id){ return document.getElementById(id); };
-  var BUILD = "2026-10-20a · Sync: every laptop shows exactly what the sheet says";
+  var BUILD = "2026-10-22a · Board: one column per engineer (ScottMenzies = Scott Menzies)";
 
   /* ---------- header normalisation ---------- */
   var MAP = {
@@ -1129,7 +1129,29 @@
         if(a>=b) out[byId[r.id]] = r;                 // ties -> later row wins
       } else { byId[r.id]=out.length; out.push(r); }
     });
+    sameEngineerName(out);
     return out;
+  }
+
+  // One column per engineer: the Zaps sometimes write "ScottMenzies" / "JackShearer" instead of
+  // "Scott Menzies". Rows whose names only differ by spaces, dashes or case are shown under one name,
+  // the spaced one if any row has it. Only the displayed name changes — the card id, and the row
+  // match used for writes (shift_id / _raw), stay as they were.
+  function prettyEngineer(n){
+    n = String(n||"").trim().replace(/\s+/g," ");
+    if(n.indexOf(" ")<0) n = n.replace(/([a-z])([A-Z])/g,"$1 $2");   // "EthanHeath-Mills" -> "Ethan Heath-Mills"
+    return n;
+  }
+  function sameEngineerName(list){
+    var best = {};
+    list.forEach(function(r){
+      var k = canon(r.engineer), n = prettyEngineer(r.engineer);
+      if(!k) return;
+      var cur = best[k];
+      if(!cur || (cur.indexOf(" ")<0 && n.indexOf(" ")>-1)) best[k] = n;
+    });
+    list.forEach(function(r){ var k = canon(r.engineer); if(k && best[k]) r.engineer = best[k]; });
+    return list;
   }
 
   /* ---------- fetch ---------- */
