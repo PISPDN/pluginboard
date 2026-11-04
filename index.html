@@ -644,6 +644,7 @@
   .cardimg{display:block;max-width:100%;max-height:240px;object-fit:cover;border:1px solid var(--line);border-radius:8px;margin-top:2px}
   /* materials check tag on job cards */
   .matbar{display:flex;align-items:flex-start;gap:6px;margin:0 0 9px;flex-wrap:wrap}
+  .updtag{display:inline-flex;align-items:center;margin:0 0 8px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#E8F0FB;color:#1F4E8C;border:1px solid #B9CDEB}
   .mattag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;
     background:var(--pending-soft);color:var(--pending);white-space:nowrap}
   .mattag.m-detected{background:var(--urgent);color:#fff}
@@ -970,7 +971,7 @@
 
   var STAT = { pending:"pending", actioned:"actioned", urgent:"urgent" };
   var el = function(id){ return document.getElementById(id); };
-  var BUILD = "2026-11-03a · CEF online: match our items CEF seems to be missing to CEF’s item";
+  var BUILD = "2026-11-04b · Van stock: Merge deliveries button (new EV Ultra / CU delivery items added onto the original)";
 
   /* ---------- header normalisation ---------- */
   var MAP = {
@@ -996,6 +997,8 @@
     var o={};
     Object.keys(MAP).forEach(function(field){ o[field]=pick(row, MAP[field]); });
     o._raw = raw;                                 // original columns, for the detail view
+    // set by Code.gs when this shift was cleared / removed from the board and Connecteam has sent it again since
+    o.updated_after_clear = String(raw.updated_after_clear || "").trim();
     return o;
   }
 
@@ -1960,7 +1963,8 @@
       { key:"date", label:"Date",     options:DATE_FWD },
       { key:"mat",  label:"Materials", options:[{v:"",t:"Any"},{v:"needs",t:"Needs something"},{v:"detected",t:"Detected"},{v:"check",t:"Check van"},{v:"standard",t:"Standard"},{v:"unsure",t:"Unsure"},{v:"waiting",t:"Not checked yet"},{v:"unrated",t:"Not ✓/✗ yet"},{v:"wrong",t:"Marked ✗ wrong"}] },
       { key:"sort", label:"Sort",     options:[{v:"",t:"Date ↑"},{v:"dated",t:"Date ↓"},{v:"title",t:"Title A–Z"},{v:"status",t:"Status"},{v:"eng",t:"Engineer"}] },
-      { key:"note", type:"check", label:"Has a note" }
+      { key:"note", type:"check", label:"Has a note" },
+      { key:"upd",  type:"check", label:"Updated since cleared" }
     ];
   }
   function jobPass(tab, s){
@@ -1972,6 +1976,7 @@
     if(!inRange(s.start, fv(tab,"date"))) return false;
     if(!matPass(s, fv(tab,"mat"))) return false;
     if(fv(tab,"note") === "1" && !((statuses[s.id] && statuses[s.id].blocker) || s.notes)) return false;
+    if(fv(tab,"upd") === "1" && !s.updated_after_clear) return false;
     return matchQ(s, fv(tab,"q"));
   }
   function statusRank(x){ var v = statusOf(x.id); return v === "urgent" ? 0 : (v === "pending" ? 1 : 2); }
@@ -2357,6 +2362,7 @@
         '<span class="daychip '+cls+'">'+dayLabel(n)+'</span>'+
         '<div class="cardeng">'+esc(s.engineer)+'</div>'+
         '<div class="title">'+esc(s.job_title)+'</div>'+
+        updTagHtml(s)+
         (meta?'<div class="meta">'+meta+'</div>':'')+
         matBarHtml(s)+
       '</div>'+
@@ -5398,7 +5404,8 @@
       (nProb?'<span class="lvlwarn">'+nProb+' folder'+(nProb>1?'s':'')+' to check</span>':'')+
       '<span class="lvlat">Checked '+esc(vans.at?fmtTime(vans.at):"—")+(vans.partial?' · <span class="lvlwarn">partial read</span>':'')+'</span>'+
       (vansState!=="ok"&&vansState?'<span class="lvlwarn">Last refresh failed — showing the previous check</span>':'')+
-      '<span class="lvlbtns"><button class="primary" id="vanCheck"'+(vansBusy?' disabled':'')+'>'+(vansBusy?'Checking Sortly…':'Check Sortly now')+'</button></span></div>';
+      '<span class="lvlbtns"><button class="ghost" id="vanMerge"'+(mrg.busy?' disabled':'')+' title="Adds new EV Ultra / CU delivery items onto the original item in each lock-up, then deletes the new one">'+(mrg.busy?'Working…':'Merge deliveries')+'</button>'+
+      '<button class="primary" id="vanCheck"'+(vansBusy?' disabled':'')+'>'+(vansBusy?'Checking Sortly…':'Check Sortly now')+'</button></span></div>'+mrgPanelHtml();
     var bar=fbarHtml("vans", vanSpecs(), vis.length, list.length, true);
     if(!vis.length){ view.innerHTML=head+bar+noMatch("vans"); wireFbar(view,"vans"); wireVanHead(); return; }
 
@@ -5420,7 +5427,71 @@
     wireFbar(view,"vans");
     wireVanHead();
   }
-  function wireVanHead(){ var c=el("vanCheck"); if(c) c.onclick=function(){ fetchVans(true); }; }
+  function wireVanHead(){ var c=el("vanCheck"); if(c) c.onclick=function(){ fetchVans(true); }; wireMerge(); }
+
+  /* MERGE DELIVERIES — Merge.gs (?action=mergedeliveries). The delivery picklist adds EV Ultra /
+     IP65 CU / Metal CU as a NEW item next to the one already in the lock-up; the deductions only
+     take off the original (its ID is in Engineer Folder ID's). Preview first, then merge the
+     ticked lines: the new item's quantity is added onto the original and the new item deleted. */
+  var mrg = { open:false, busy:false, plan:null, result:null, err:"", pick:{} };
+  function mrgQ(n, u){ return esc(fmtQty(Number(n)||0)+(u||"")); }
+  function mrgPanelHtml(){
+    if(!mrg.open) return "";
+    var h='<div class="vansend mrgpanel" style="display:block"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b>Merge deliveries</b>'+
+      '<span class="tallynote" style="margin:0">Adds each new EV Ultra / CU delivery item onto the original (the ID in Engineer Folder ID’s, which the deductions use), then deletes the new item — it goes to Sortly’s Trash.</span>'+
+      '<button class="ghost" id="mrgClose" style="margin-left:auto">Close</button></div>';
+    if(mrg.busy) return h+'<div>'+(mrg.plan?'Merging in Sortly…':'Reading every lock-up in Sortly… (up to a minute)')+'</div></div>';
+    if(mrg.err) return h+'<div class="vanwarn bad">'+esc(mrg.err)+'</div><button class="ghost" id="mrgAgain">Try again</button></div>';
+    if(mrg.result){
+      h+=(mrg.result.merged||[]).map(function(r){
+        if(!r.ok) return '<div class="vanwarn bad">'+esc(r.engineer)+' · '+esc(r.label)+': '+esc(r.error||((r.steps||[]).map(function(s){ return s.error||""; }).join(" ")))+'</div>';
+        return '<div>✓ '+esc(r.engineer)+' · '+esc(r.label)+': now '+mrgQ(r.after,r.unit)+' on item '+esc(r.keepId)+' ('+(r.steps||[]).filter(function(s){ return s.added!==undefined; }).length+' new item'+((r.steps||[]).length===1?'':'s')+' merged and deleted)</div>';
+      }).join("");
+      return h+'<div style="margin-top:6px"><button class="ghost" id="mrgAgain">Check again</button></div></div>';
+    }
+    var p=mrg.plan||{groups:[],warnings:[]};
+    if(!p.groups.length) h+='<div>No duplicates — every lock-up has one EV Ultra, one IP65 CU and one Metal CU.</div>';
+    h+=p.groups.map(function(g){
+      var dis=!g.canMerge, on=!dis && mrg.pick[g.key]!==false;
+      var line=esc(g.engineer)+' · <b>'+esc(g.label)+'</b>: '+(g.keep?'original '+esc(g.keep.id)+' ('+mrgQ(g.keep.qty,g.unit)+')':'')+
+        ' + new '+g.extra.map(function(x){ return esc(x.id)+' ('+mrgQ(x.qty,g.unit)+(x.created?', '+esc(String(x.created).slice(0,10)):'')+')'; }).join(", ")+
+        (g.canMerge?' → <b>'+mrgQ(g.total,g.unit)+'</b>':'');
+      return '<label style="display:block;margin:3px 0"><input type="checkbox" data-mrg="'+esc(g.key)+'"'+(on?' checked':'')+(dis?' disabled':'')+'> '+line+
+        (g.problem?'<div class="vanwarn bad">'+esc(g.problem)+'</div>':'')+(g.note?'<div class="tallynote">'+esc(g.note)+'</div>':'')+'</label>';
+    }).join("");
+    if(p.warnings && p.warnings.length) h+=p.warnings.map(function(w){ return '<div class="vanwarn">'+esc(w.engineer)+': '+esc(w.text)+'</div>'; }).join("");
+    if(p.groups.some(function(g){ return g.canMerge; })) h+='<div style="margin-top:8px"><button class="primary" id="mrgGo">Merge ticked</button></div>';
+    return h+'</div>';
+  }
+  function mrgFetch(go){
+    mrg.busy=true; mrg.err=""; render();
+    var params={ action:"mergedeliveries" };
+    if(go){
+      params.go="1";
+      params.only=(mrg.plan.groups||[]).filter(function(g){ return g.canMerge && mrg.pick[g.key]!==false; }).map(function(g){ return g.key; }).join(",");
+      if(!params.only){ mrg.busy=false; render(); return; }
+    }
+    jsonp(cfg.apiUrl, params, function(err, data){
+      mrg.busy=false;
+      if(err || !data) mrg.err = err && /timeout/.test(err.message) ? "Sortly took too long — press Try again." : "Couldn’t reach the Apps Script.";
+      else if(!data.ok) mrg.err = /no matching row|unknown action|tab not found/i.test(data.error||"") ? "The live Apps Script doesn’t have Merge.gs yet — add it, add the hook line in Code.gs, and deploy a new version." : (data.error||"Merge failed");
+      else if(go){ mrg.result=data; fetchVans(true); }
+      else { mrg.plan=data; mrg.result=null; mrg.pick={}; }
+      render();
+    }, 300000);
+  }
+  function wireMerge(){
+    var b=el("vanMerge"); if(b) b.onclick=function(){ mrg.open=true; mrg.plan=null; mrg.result=null; mrgFetch(false); };
+    var c=el("mrgClose"); if(c) c.onclick=function(){ mrg.open=false; render(); };
+    var a=el("mrgAgain"); if(a) a.onclick=function(){ mrg.plan=null; mrg.result=null; mrgFetch(false); };
+    var g=el("mrgGo"); if(g) g.onclick=function(){
+      var n=(mrg.plan.groups||[]).filter(function(x){ return x.canMerge && mrg.pick[x.key]!==false; }).length;
+      if(!n) return;
+      if(g.dataset.sure!=="1"){ g.dataset.sure="1"; g.textContent="Sure? Merge "+n+" line"+(n>1?"s":"")+" in Sortly"; return; }
+      mrgFetch(true);
+    };
+    document.querySelectorAll("input[data-mrg]").forEach(function(i){ i.onchange=function(){ mrg.pick[i.getAttribute("data-mrg")]=i.checked; }; });
+  }
   function wireVanRetry(){ var r=el("vanRetry"); if(r) r.onclick=function(){ fetchVans(true); }; }
 
   function stat(cls, n, label){ return '<div class="stat '+cls+'"><b>'+n+'</b><span>'+label+'</span></div>'; }
@@ -5701,6 +5772,11 @@
   }
 
 
+  // "Updated since cleared": the job was cleared off the board, then Connecteam sent the shift again
+  function updTagHtml(s){
+    if(!s.updated_after_clear) return "";
+    return '<span class="updtag" title="Cleared from the board on '+esc(s.updated_after_clear)+'. Connecteam has sent an update for this shift since then — check what changed.">Updated since cleared</span>';
+  }
   function cardHtml(s, opts){
     opts = opts || {};
     var st=statusOf(s.id);
@@ -5716,6 +5792,7 @@
       '<div class="card-body" data-open="'+esc(s.id)+'">'+
         eng+
         '<div class="title">'+esc(s.job_title)+'</div>'+
+        updTagHtml(s)+
         (meta?'<div class="meta">'+meta+'</div>':'')+
         matBarHtml(s)+
         notes+
@@ -5764,6 +5841,7 @@
     html += drow("Location", s.location);
     html += drow("Notes", s.notes);
     html += drow("Shift ID", s.shift_id);
+    html += drow("Updated since cleared", s.updated_after_clear ? "Cleared on "+s.updated_after_clear+" — Connecteam has sent an update for this shift since" : "");
     html += matDetailHtml(s);
 
     // every remaining column from the sheet, so nothing is hidden
@@ -5774,6 +5852,7 @@
         var key=String(k).trim(), low=key.toLowerCase(), val=String(s._raw[k]||"").trim();
         if(!val) return;
         if(/^mat_/.test(low)) return;                // shown in the Materials check box instead
+        if(low === "updated_after_clear") return;    // shown above
         // skip the ones already surfaced above (match by any mapped synonym)
         var isKnown=false;
         Object.keys(MAP).forEach(function(f){ if(synMatch(MAP[f], key) && (shown[f]||f==="job_title"||f==="shift_id")) isKnown=true; });
