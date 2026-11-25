@@ -868,6 +868,44 @@
   .ixwk.on{ color:inherit; background:rgba(142,209,85,.12); }
   .ixwk span{ flex:1; } .ixwk em{ font-style:normal; opacity:.7; } .ixwk b{ font-weight:600; opacity:.8; }
   .otable tr.ixwkhd td{ font-weight:700; font-size:12px; letter-spacing:.02em; padding-top:12px; color:var(--muted); border-bottom:1px solid rgba(142,209,85,.35); }
+  /* ---------- engineers (add / switch to monthly) ---------- */
+  .engcard{display:flex;flex-direction:column}
+  .englines{margin:6px 0 4px 37px;display:grid;gap:2px}
+  .engline{display:flex;gap:8px;font-size:12px;line-height:1.5;min-width:0}
+  .engline span{color:var(--faint);flex:0 0 84px}
+  .engline b{font-weight:600;color:var(--ink);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+  .engline b i{color:var(--faint);font-style:normal;font-weight:500}
+  .engacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:8px;border-top:1px solid var(--line)}
+  .engacts .ghost{padding:5px 10px;font-size:12px}
+  .engacts .engleft{color:var(--muted)}
+  .engacts .engleft:hover{color:var(--urgent);border-color:var(--urgent)}
+  .engdate{display:inline-flex;gap:6px;align-items:center}
+  .engdate input,.engform input,.engform select,.engslot input,.engslot select{border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:13px;color:var(--ink);background:var(--panel);min-width:0}
+  .engform input:focus,.engform select:focus,.engslot input:focus,.engslot select:focus,.engdate input:focus{outline:2px solid var(--live);outline-offset:-1px;border-color:var(--live)}
+  .engform{background:var(--panel);border:1px solid var(--live);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .engformh{font-size:15px;font-weight:700;margin-bottom:10px}
+  .engformh span{font-weight:500;color:var(--muted);font-size:13px}
+  .engfields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 14px}
+  .engfields label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted)}
+  .engwhat{font-size:12.5px;color:var(--muted);line-height:1.55;margin:12px 0;max-width:78ch}
+  .engwhat b{color:var(--ink)}
+  .engfbtns{display:flex;gap:8px;flex-wrap:wrap}
+  .engmsg{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;font-weight:600;color:var(--actioned);background:var(--actioned-soft);border-radius:8px;padding:8px 12px;margin-bottom:12px}
+  .engmsg.bad{color:var(--urgent);background:var(--urgent-soft)}
+  .engmsg .ghost{padding:4px 10px;font-size:12px}
+  .engx{margin-left:auto;border:0;background:none;color:inherit;font-size:17px;line-height:1;padding:0 2px;opacity:.7}
+  .engwaits{display:grid;gap:10px;margin-bottom:14px}
+  .engwait{background:var(--pending-soft);border:1px solid var(--pending);border-radius:12px;padding:12px 14px}
+  .engwait.late{background:var(--urgent-soft);border-color:var(--urgent)}
+  .engwaith{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.45}
+  .engsub{font-size:12px;color:var(--muted)}
+  .engslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin:10px 0 10px 38px}
+  .engslot{display:flex;flex-direction:column;gap:5px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .engslot span{font-size:11.5px;font-weight:700;color:var(--muted)}
+  .engslot.ok b{color:var(--actioned);font-size:13px;font-variant-numeric:tabular-nums}
+  .engwaitf{margin-left:38px}
+  .engwaitf .primary{padding:7px 14px;font-size:12.5px}
+  @media (max-width:600px){ .engslots,.engwaitf,.englines{margin-left:0} }
 </style>
 
 <div class="topbar">
@@ -889,6 +927,7 @@
   <button class="tab" data-tab="levels" id="tabLevels">Levels <span class="tabbadge" id="lvlBadge" hidden>0</span></button>
   <button class="tab" data-tab="vans" id="tabVans">Van stock <span class="tabbadge" id="vanBadge" hidden>0</span></button>
   <button class="tab" data-tab="deliveries" id="tabDeliveries">Deliveries <span class="tabbadge" id="dlvBadge" hidden>0</span></button>
+  <button class="tab" data-tab="engineers" id="tabEngineers">Engineers <span class="tabbadge" id="engBadge" hidden>0</span></button>
   <button class="tab" data-tab="stock" id="tabStock">Stock <span class="tabbadge" id="stockBadge" hidden>0</span></button>
   <button class="tab" data-tab="troubleshoots" id="tabTroubleshoots">Troubleshoots <span class="tabbadge" id="tshBadge" hidden>0</span></button>
   <button class="tab" data-tab="errors" id="tabErrors">Errors <span class="tabbadge" id="errBadge" hidden>0</span></button>
@@ -908,6 +947,7 @@
 <div class="levelsview" id="levelsview" style="display:none"></div>
 <div class="levelsview" id="vanview" style="display:none"></div>
 <div class="levelsview" id="dlvview" style="display:none"></div>
+<div class="levelsview" id="engview" style="display:none"></div>
 <div class="stockview" id="stockview" style="display:none"></div>
 <div class="tshview" id="tshview" style="display:none"></div>
 <div class="errview" id="errview" style="display:none"></div>
@@ -1107,7 +1147,7 @@
 
   var STAT = { pending:"pending", actioned:"actioned", urgent:"urgent" };
   var el = function(id){ return document.getElementById(id); };
-  var BUILD = "2026-11-18a · Screwfix & Toolstation prices, new breaker lines, Rexel quote 0094201020";
+  var BUILD = "2026-11-25a · Engineers tab: add engineers and switch them to monthly (Engineers.gs)";
 
   /* ---------- header normalisation ---------- */
   var MAP = {
@@ -1470,7 +1510,7 @@
     }catch(e){}
   }
   function refreshAll(showErr){
-    if(cfg.apiUrl){ fetchData(showErr); fetchLevels(false); fetchVans(false); fetchDlv(); fetchMat(false); ordSync(); return; }
+    if(cfg.apiUrl){ fetchData(showErr); fetchLevels(false); fetchVans(false); fetchDlv(); fetchEng(); fetchMat(false); ordSync(); return; }
     fetchShifts(showErr); fetchErrors(); fetchStock(); fetchFlow(); fetchSortly(); fetchQty(); fetchTasks();
   }
 
@@ -1930,7 +1970,7 @@
   }
 
   // Engineers on monthly deliveries — always in the Board / Calendar engineer filter, even with no
-  // jobs on the board yet, plus an "All monthly engineers" option. Add new monthly engineers here.
+  // jobs on the board yet, plus an "All monthly engineers" option. Filled from the Engineers tab once it loads (fallback list below).
   var MONTHLY_ENGINEERS = ["Benjamin Cole","Brandon Hall","Ethan Heath-Mills","Jack Place","Jack Shearer",
                            "Jake Reed","Nick Smith","Raymond Higgins","Sam Day","Scott Menzies","Surinder Dhir"];
   var MONTHLY_KEY = "@monthly";
@@ -2204,6 +2244,7 @@
     renderLevels();
     renderVans();
     renderDeliveries();
+    renderEngineers();
     renderTasks();
     renderFlow();
     renderCalendar();
@@ -2356,7 +2397,9 @@
     var vb=el("vanBadge");
     if(vb){ if(nVan>0){ vb.textContent=nVan; vb.hidden=false; } else { vb.hidden=true; } }
     // the bell gets ONE van line (not one per engineer), so it stays readable
-    var nb=el("notifBadge"), nLow=lowLevels().length, nDlv=((dlv.state==="ok"||dlv.state==="stale")&&dlvAlerts().length)?1:0, n=notifItems().length+nLow+nTsh+(nVan?1:0)+nDlv;
+    var nb=el("notifBadge"), nLow=lowLevels().length, nDlv=((dlv.state==="ok"||dlv.state==="stale")&&dlvAlerts().length)?1:0, n=notifItems().length+nLow+nTsh+(nVan?1:0)+nDlv+(engWaiting().length?1:0);
+    var gb=el("engBadge"), gn=engWaiting().length;
+    if(gb){ if(gn>0){ gb.textContent=gn; gb.hidden=false; } else { gb.hidden=true; } }
     var lb=el("lvlBadge");
     if(lb){ if(nLow>0){ lb.textContent=nLow; lb.hidden=false; } else { lb.hidden=true; } }
     if(n>0){ nb.textContent=n; nb.hidden=false; } else { nb.hidden=true; }
@@ -2386,6 +2429,7 @@
     el("levelsview").style.display = t==="levels"?"block":"none";
     el("vanview").style.display = t==="vans"?"block":"none";
     el("dlvview").style.display = t==="deliveries"?"block":"none";
+    el("engview").style.display = t==="engineers"?"block":"none";
     el("errview").style.display  = t==="errors"?"block":"none";
     el("tshview").style.display  = t==="troubleshoots"?"block":"none";
     el("infview").style.display  = t==="otherinfo"?"block":"none";
@@ -6629,7 +6673,8 @@
     if(!view) return;
     var items=notifItems(), lows=lowLevels(), tshs=openTroubleshoots(), vlow=lowVans();
     var dues=(dlv.state==="ok"||dlv.state==="stale") ? dlvAlerts() : [];
-    if(!items.length && !lows.length && !tshs.length && !vlow.length && !dues.length){
+    var ewait=engWaiting();
+    if(!items.length && !lows.length && !tshs.length && !vlow.length && !dues.length && !ewait.length){
       view.innerHTML='<div class="notifempty"><b>Nothing needs chasing.</b><br>Jobs appear here as their date comes within 3 days, and drop off once you mark them Actioned. Sortly folders show here when they run low, and Hypervolt / EVEC troubleshoots until you dismiss them.</div>';
       return;
     }
@@ -6661,8 +6706,15 @@
         '<div class="title">'+dues.length+' deliver'+(dues.length>1?'ies':'y')+' due within '+dlv.warnDays+' days</div>'+
         '<div class="meta"><span class="m">'+ICON.box+dues.map(function(e){ return esc(e.name)+' '+(e.left<0?'('+(-e.left)+'d late)':e.left===0?'(today)':'('+e.left+'d)')+(e.auditDue?' · audit':''); }).join(' · ')+'</span></div></div></div>';
     })() : "";
-    var jobHtml = items.length ? ((lows.length||tshs.length||vlow.length||dues.length)?'<div class="notifsec">Jobs due</div>':'')+items.map(notifCardHtml).join("") : "";
-    view.innerHTML=lowHtml+vanHtml+dueHtml+tshHtml+jobHtml;
+    var engHtml = ewait.length ? '<div class="notifsec">Engineers</div><div class="card '+(ewait.some(function(e){ return e.monthlyNow; })?'s-urgent':'s-pending')+'" data-engnotif="1">'+
+      '<div class="card-body"><span class="daychip'+(ewait.some(function(e){ return e.monthlyNow; })?' overdue':'')+'">Item ids needed</span>'+
+      '<div class="title">'+ewait.length+' lock-up'+(ewait.length>1?'s':'')+' waiting for EV Ultra / CU item ids</div>'+
+      '<div class="meta"><span class="m">'+ICON.box+ewait.map(function(e){ return esc(e.name); }).join(' · ')+'</span></div></div></div>' : "";
+    var jobHtml = items.length ? ((lows.length||tshs.length||vlow.length||dues.length||ewait.length)?'<div class="notifsec">Jobs due</div>':'')+items.map(notifCardHtml).join("") : "";
+    view.innerHTML=lowHtml+vanHtml+dueHtml+engHtml+tshHtml+jobHtml;
+    Array.prototype.forEach.call(view.querySelectorAll("[data-engnotif]"), function(c){
+      c.onclick=function(){ el("notifPanel").hidden=true; F("engineers").st="waiting"; fsave(); showTab("engineers"); };
+    });
     Array.prototype.forEach.call(view.querySelectorAll("[data-dlvnotif]"), function(c){
       c.onclick=function(){ el("notifPanel").hidden=true; F("dlv").st="due"; fsave(); showTab("deliveries"); };
     });
@@ -8192,6 +8244,278 @@
   }
 
   /* ---------- refresh loop ---------- */
+  /* =========================================================================
+     ENGINEERS — add engineers and move them onto monthly deliveries.
+     Engineers.gs (Apps Script) makes the Sortly folders, keeps the Engineers
+     tab and Engineer Folder ID's in step, and fills in the EV Ultra / Metal CU /
+     IP65 CU item ids once the first delivery puts them in the lock-up.
+     ========================================================================= */
+  var engS = { state:"", err:"", rows:[], live:true, setup:true, busy:false, act:"", msg:"", bad:false,
+               retry:null, form:"", fv:{}, sure:"", lastTick:"" };
+  var ENG_KINDS = [{ k:"cable", t:"EV Ultra" }, { k:"metalcu", t:"Metal CU" }, { k:"ip65cu", t:"IP65 CU" }];
+
+  function fetchEng(cb){
+    if(!cfg.apiUrl){ engS.state="noapi"; if(cb) cb(); return; }
+    if(engS.busy){ if(cb) cb(); return; }
+    engS.busy=true;
+    jsonp(cfg.apiUrl, { action:"engineers" }, function(err, data){
+      engS.busy=false;
+      if(err || !data) engS.state = engS.rows.length ? "stale" : "error";
+      else if(!data.ok){ engS.state = /unknown action/i.test(data.error||"") ? "olddeploy" : "apierror"; engS.err = data.error||""; }
+      else engTake(data);
+      render();
+      if(cb) cb();
+    }, 30000);
+  }
+  function engTake(data){
+    engS.rows = data.engineers || []; engS.live = data.live !== false; engS.setup = data.setup !== false;
+    engS.lastTick = data.lastTick || ""; engS.state = "ok"; engS.err = "";
+    // the board's "monthly engineers" now come from the Engineers tab, not the list typed into this file
+    if(engS.setup && engS.rows.length){
+      var mon = engS.rows.filter(function(e){ return e.active && e.monthlyNow; }).map(function(e){ return e.name; }).sort();
+      MONTHLY_ENGINEERS.length = 0;
+      mon.forEach(function(n){ MONTHLY_ENGINEERS.push(n); });
+    }
+  }
+  function engWaiting(){ return engS.rows.filter(function(e){ return e.active && e.status==="monthly" && (e.missing||[]).length; }); }
+
+  function engPost(fields){
+    if(!cfg.apiUrl) return Promise.resolve({ ok:false, error:"Set the Live API URL in Settings first." });
+    var body=new URLSearchParams();
+    Object.keys(fields).forEach(function(k){ body.set(k, fields[k]==null ? "" : fields[k]); });
+    if(authToken) body.set("token", authToken);
+    return fetch(cfg.apiUrl, { method:"POST", body:body, cache:"no-store", credentials:"omit" })
+      .then(function(r){ return r.json(); })
+      .catch(function(){ return null; })
+      .then(function(d){
+        if(d && d.ok===false && d.auth===true) authFailed();
+        return d || { ok:false, error:"No answer from the Apps Script — check the connection and try again." };
+      });
+  }
+  function engDo(label, fields, after){
+    if(engS.act) return;
+    engS.act=label; engS.msg=""; engS.retry=null; engS.sure=""; render();
+    engPost(fields).then(function(d){
+      engS.act="";
+      engS.bad=!d.ok;
+      engS.msg = d.ok ? (d.msg || "Done.") : (d.error || "That didn’t save.");
+      engS.retry = (!d.ok && d.confirm) ? Object.assign({}, fields, { force:"1" }) : null;
+      if(d.ok && after) after(d);
+      render();
+      fetchEng();
+    });
+  }
+  function engVal(k){ return String(engS.fv[k]==null ? "" : engS.fv[k]); }
+  function engLockName(name){
+    var parts=String(name||"").trim().split(/\s+/), first=parts[0]||"", last=parts[parts.length-1]||"";
+    var clash=engS.rows.some(function(o){ return canon(o.name)!==canon(name) && canon(o.name.split(" ")[0])===canon(first); });
+    return clash ? first+" "+last.charAt(0).toUpperCase() : first;
+  }
+  function engDateTxt(s){ var d=dlvDay(s); return d ? dlvFmt(d, true) : (s||"—"); }
+
+  function engSpecs(){
+    return [
+      { key:"q", type:"search", placeholder:"Search name, email, folder id…" },
+      { key:"st", label:"Show", options:[{v:"",t:"Everyone working"},{v:"monthly",t:"On monthly deliveries"},{v:"weekly",t:"On weekly deliveries"},
+        {v:"soon",t:"Starting monthly soon"},{v:"waiting",t:"Waiting for item ids"},{v:"left",t:"Left the company"}] },
+      { key:"sort", label:"Sort", options:[{v:"",t:"Name A–Z"},{v:"added",t:"Newest added first"},{v:"from",t:"Monthly start date"}] }
+    ];
+  }
+  function engPass(e){
+    var st=fv("engineers","st",""), q=fv("engineers","q","").toLowerCase();
+    if(st==="left"){ if(e.active) return false; } else if(!e.active) return false;
+    if(st==="monthly" && !e.monthlyNow) return false;
+    if(st==="weekly" && e.status!=="weekly") return false;
+    if(st==="soon" && !(e.status==="monthly" && !e.monthlyNow)) return false;
+    if(st==="waiting" && !(e.status==="monthly" && (e.missing||[]).length)) return false;
+    if(q && [e.name,e.email,e.van,e.lockup,e.audit].join(" ").toLowerCase().indexOf(q)<0) return false;
+    return true;
+  }
+
+  function engChip(e){
+    if(!e.active) return '<span class="vanneed off">Left</span>';
+    if(e.status!=="monthly") return '<span class="vanneed off">Weekly</span>';
+    if(!e.monthlyNow) return '<span class="vanneed dlvsoon">Monthly from '+esc(engDateTxt(e.monthlyFrom))+'</span>';
+    if((e.missing||[]).length) return '<span class="vanneed low" title="CU and EV Ultra aren’t taken off until the item ids are in">Monthly · ids missing</span>';
+    return '<span class="vanneed ok">Monthly</span>';
+  }
+  function engLine(label, val){ return '<div class="engline"><span>'+label+'</span><b>'+(val?esc(val):'<i>—</i>')+'</b></div>'; }
+
+  function engCardHtml(e){
+    var i=engS.rows.indexOf(e), n=esc(e.name), monthly=e.status==="monthly", soon=monthly && !e.monthlyNow;
+    var h='<div class="vancard engcard'+(e.active?"":" notmonthly")+'">'+
+      '<div class="vanhead"><div class="avatar" style="background:'+colorFor(e.name)+'">'+esc(initials(e.name))+'</div>'+
+      '<div class="vanname" title="'+n+'">'+n+'</div>'+engChip(e)+'</div>';
+    h+='<div class="englines">'+
+      engLine("Van folder", e.van)+
+      (monthly||e.lockup ? engLine("Lock-up", e.lockup) : "")+
+      (monthly||e.audit ? engLine("Audit folder", e.audit) : "")+
+      (monthly ? engLine("Item ids", ENG_KINDS.map(function(k){ return k.t+" "+(e.ids&&e.ids[k.k] ? "✓" : "✗"); }).join(", ")) : "")+
+      engLine("Email", e.email)+'</div>';
+    if(e.active && soon) h+='<div class="vanfoot">Until '+esc(engDateTxt(e.monthlyFrom))+' their chargers are looked up in the van folder; from then on, the lock-up.</div>';
+    if(e.active && e.monthlyNow && !e.van && !e.lockup) h+='<div class="vanwarn bad">No Sortly folder set.</div>';
+    var b='';
+    if(!e.active) b+='<button class="ghost" data-eact="back" data-ei="'+i+'">Bring back</button>';
+    else {
+      if(!monthly) b+='<button class="ghost" data-eact="tomonthly" data-ei="'+i+'">Switch to monthly</button>';
+      if(soon){
+        b+='<span class="engdate"><input type="date" id="engfrom_'+i+'" data-ef="from|'+i+'" value="'+esc(engS.fv["from|"+i]!=null ? engVal("from|"+i) : e.monthlyFrom)+'">'+
+           '<button class="ghost" data-eact="setfrom" data-ei="'+i+'">Change date</button></span>';
+        b+='<button class="ghost" data-eact="undo" data-ei="'+i+'" title="Keeps the lock-up and audit folders in Sortly">'+(engS.sure==="undo|"+i?"Sure? Click again":"Back to weekly")+'</button>';
+      }
+      b+='<button class="ghost engleft" data-eact="left" data-ei="'+i+'">'+(engS.sure==="left|"+i?"Sure? Click again":"Mark as left")+'</button>';
+    }
+    return h+'<div class="engacts">'+b+'</div></div>';
+  }
+
+  function engWaitHtml(e){
+    var i=engS.rows.indexOf(e), cand=e.candidates||{};
+    var slots=ENG_KINDS.map(function(k){
+      var have=e.ids&&e.ids[k.k];
+      if(have) return '<div class="engslot ok"><span>'+k.t+'</span><b>✓ '+esc(have)+'</b></div>';
+      var key="id|"+i+"|"+k.k, list=cand[k.k]||[];
+      var pick = list.length ? '<select id="engpick_'+i+'_'+k.k+'" data-epick="'+key+'"><option value="">'+list.length+' items match — pick one</option>'+
+        list.map(function(c){ return '<option value="'+esc(c.id)+'"'+(engVal(key)===String(c.id)?" selected":"")+'>'+esc(c.name)+' · qty '+esc(fmtQty(c.qty==null?1:c.qty))+(c.path?' · '+esc(c.path):'')+'</option>'; }).join("")+'</select>' : '';
+      return '<div class="engslot need"><span>'+k.t+'</span>'+pick+
+        '<input type="text" inputmode="numeric" id="engid_'+i+'_'+k.k+'" data-ef="'+key+'" placeholder="Sortly item id" value="'+esc(engVal(key))+'"></div>';
+    }).join("");
+    var when = e.monthlyNow ? 'On monthly since '+engDateTxt(e.monthlyFrom||"")+' — <b>their CU and EV Ultra cable aren’t being taken off yet.</b>'
+                            : 'First monthly delivery '+engDateTxt(e.monthlyFrom)+'.';
+    return '<div class="engwait'+(e.monthlyNow?" late":"")+'">'+
+      '<div class="engwaith"><div class="avatar" style="background:'+colorFor(e.name)+'">'+esc(initials(e.name))+'</div>'+
+      '<div><b>'+esc(e.name)+'</b> needs the EV Ultra, Metal CU and IP65 CU item ids from their lock-up'+(e.lockup?' ('+esc(e.lockup)+')':'')+'.<br>'+
+      '<span class="engsub">'+when+' They fill in by themselves once the first delivery puts the items in the lock-up'+(e.scannedAt?' (last looked '+esc(e.scannedAt.slice(11))+')':'')+', or type the ids in.</span></div></div>'+
+      '<div class="engslots">'+slots+'</div>'+
+      '<div class="engwaitf"><button class="primary" data-eact="saveids" data-ei="'+i+'"'+(engS.act?" disabled":"")+'>Save ids</button></div></div>';
+  }
+
+  function engFormHtml(){
+    if(engS.form==="add"){
+      var nm=engVal("add.name");
+      return '<div class="engform"><div class="engformh">Add a new engineer <span>— on weekly deliveries, with a van folder</span></div>'+
+        '<div class="engfields">'+
+        '<label>Full name, as in Connecteam<input type="text" id="engAddName" data-ef="add.name" value="'+esc(nm)+'" placeholder="e.g. Alex Dillard" autocomplete="off"></label>'+
+        '<label>Email (optional)<input type="email" id="engAddEmail" data-ef="add.email" value="'+esc(engVal("add.email"))+'" autocomplete="off"></label>'+
+        '<label>Van folder name in Sortly<input type="text" id="engAddFolder" data-ef="add.folder" value="'+esc(engVal("add.folder"))+'" placeholder="'+esc(nm||"Same as their name")+'"></label></div>'+
+        '<div class="engwhat">This makes <b>Engineers Vans / '+esc(engVal("add.folder")||nm||"their name")+'</b> in Sortly and adds them to Engineer Folder ID’s, so their chargers come off when they finish a job. They show on Van stock as not monthly.</div>'+
+        '<div class="engfbtns"><button class="primary" data-eact="doadd"'+(engS.act?" disabled":"")+'>'+(engS.act==="add"?"Adding…":"Add engineer")+'</button><button class="ghost" data-eact="close">Cancel</button></div></div>';
+    }
+    if(engS.form==="monthly"){
+      var weekly=engS.rows.filter(function(e){ return e.active && e.status!=="monthly"; }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+      var who=engVal("m.name"), def=who ? engLockName(who) : "", lk=engVal("m.lock")||def;
+      return '<div class="engform"><div class="engformh">Switch an engineer to monthly deliveries</div>'+
+        '<div class="engfields">'+
+        '<label>Engineer<select id="engMName" data-ef="m.name"><option value="">Pick an engineer…</option>'+
+          weekly.map(function(e){ return '<option'+(who===e.name?" selected":"")+'>'+esc(e.name)+'</option>'; }).join("")+'</select></label>'+
+        '<label>First monthly delivery<input type="date" id="engMFrom" data-ef="m.from" value="'+esc(engVal("m.from"))+'"></label>'+
+        '<label>Lock-up folder name<input type="text" id="engMLock" data-ef="m.lock" value="'+esc(engVal("m.lock"))+'" placeholder="'+esc(def||"First name")+'"></label></div>'+
+        '<div class="engwhat">This makes <b>Lock Ups / '+esc(lk||"…")+'</b> and <b>'+esc(lk||"…")+' Audit</b> in Sortly. From the delivery date, their charger lookups, Van stock and the board use the lock-up, and their jobs count as monthly. '+
+        'CU and EV Ultra cable start coming off once their three item ids are in — the board asks for them until then. The van folder is left as it is, for the audit of anything not scanned.</div>'+
+        '<div class="engfbtns"><button class="primary" data-eact="domonthly"'+(engS.act?" disabled":"")+'>'+(engS.act==="monthly"?"Making the folders…":"Switch to monthly")+'</button><button class="ghost" data-eact="close">Cancel</button></div></div>';
+    }
+    return "";
+  }
+
+  function renderEngineers(){
+    var view=el("engview"); if(!view) return;
+    function empty(m){ view.innerHTML='<div class="stockempty">'+m+'</div>'; wireEng(view); }
+    if(!cfg.apiUrl) return empty('<b>Engineers needs the live connection.</b><br>Set the Live API URL in Settings.');
+    if(engS.state==="olddeploy") return empty('<b>The live Apps Script doesn’t have Engineers.gs yet.</b><br>Add it as a new script file below Code.gs, add its hook line to handle_, run <code>setupEngineers</code> once, then Deploy → Manage deployments → pencil → New version → Deploy.');
+    if(!engS.rows.length){
+      if(!engS.state || engS.busy) return empty('<b>Loading engineers…</b>');
+      if(engS.state==="ok" && !engS.setup) return empty('<b>One step left.</b><br>Run <code>setupEngineers</code> once in the Apps Script editor — it copies today’s engineers into the new Engineers tab. Then deploy a New version.');
+      if(engS.state==="apierror") return empty('<b>Couldn’t load the engineers.</b><br>'+esc(engS.err)+'<br><br><button class="ghost" data-eact="reload">Try again</button>');
+      if(engS.state!=="ok") return empty('<b>Couldn’t reach the Apps Script.</b><br>Check the Live API URL in Settings.<br><br><button class="ghost" data-eact="reload">Try again</button>');
+    }
+    var all=engS.rows, act=all.filter(function(e){ return e.active; }), nMon=act.filter(function(e){ return e.monthlyNow; }).length;
+    var nSoon=act.filter(function(e){ return e.status==="monthly" && !e.monthlyNow; }).length, wait=engWaiting();
+    var head='<div class="lvlhead'+(wait.length?" haslow":"")+'">'+
+      '<span class="lvlsum">'+act.length+' engineers, '+nMon+' on monthly deliveries</span>'+
+      (nSoon?'<span class="lvlat">'+nSoon+' starting monthly soon</span>':'')+
+      (wait.length?'<span class="lvlwarn">'+wait.length+' waiting for lock-up item ids</span>':'')+
+      (engS.lastTick?'<span class="lvlat">Lock-ups checked '+esc(engS.lastTick.slice(11))+'</span>':'')+
+      (engS.state==="stale"?'<span class="lvlwarn">Last refresh failed — showing the previous list</span>':'')+
+      '<span class="lvlbtns">'+(wait.length?'<button class="ghost" data-eact="scan"'+(engS.act?" disabled":"")+'>'+(engS.act==="scan"?"Looking in Sortly…":"Check lock-ups now")+'</button>':'')+
+      '<button class="ghost" data-eact="openmonthly">Switch to monthly</button>'+
+      '<button class="primary" data-eact="openadd">+ Add engineer</button></span></div>';
+    var warn = !engS.live ? '<div class="vanwarn bad">The Apps Script is still using the engineer list typed into Code.gs, so changes here won’t reach Van stock or the charger lookups yet. In the Apps Script editor, Engineers.gs must sit below Code.gs in the file list (⋮ next to the file → Move file down), then deploy a New version.</div>' : '';
+    var msg = engS.msg ? '<div class="engmsg'+(engS.bad?" bad":"")+'">'+esc(engS.msg)+
+      (engS.retry?' <button class="ghost" data-eact="force">Use it anyway</button>':'')+'<button class="engx" data-eact="dismiss" title="Hide">×</button></div>' : '';
+    var waitHtml = wait.length ? '<div class="engwaits">'+wait.map(engWaitHtml).join("")+'</div>' : '';
+    var vis=all.filter(engPass), srt=fv("engineers","sort","");
+    vis.sort(function(a,b){
+      if(srt==="added") return String(b.added).localeCompare(String(a.added)) || a.name.localeCompare(b.name);
+      if(srt==="from") return String(b.monthlyFrom||"").localeCompare(String(a.monthlyFrom||"")) || a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name);
+    });
+    var bar=fbarHtml("engineers", engSpecs(), vis.length, fv("engineers","st","")==="left" ? all.filter(function(e){ return !e.active; }).length : act.length, true);
+    view.innerHTML=head+warn+msg+engFormHtml()+waitHtml+bar+(vis.length ? '<div class="vangrid">'+vis.map(engCardHtml).join("")+'</div>' : noMatch("engineers"));
+    wireFbar(view, "engineers");
+    wireEng(view);
+  }
+
+  function wireEng(view){
+    Array.prototype.forEach.call(view.querySelectorAll("[data-ef]"), function(inp){
+      var key=inp.getAttribute("data-ef");
+      inp.oninput=function(){ engS.fv[key]=inp.value; if(key==="m.lock"||key==="add.folder"||key==="add.name") engSoftRedraw(); };
+      if(inp.tagName==="SELECT") inp.onchange=function(){ engS.fv[key]=inp.value; render(); };
+    });
+    Array.prototype.forEach.call(view.querySelectorAll("[data-epick]"), function(sel){
+      sel.onchange=function(){ engS.fv[sel.getAttribute("data-epick")]=sel.value; render(); };
+    });
+    view.onclick=function(ev){
+      var b=ev.target.closest("[data-eact]"); if(!b || b.disabled) return;
+      var a=b.getAttribute("data-eact"), e=engS.rows[Number(b.getAttribute("data-ei"))];
+      if(a==="reload"){ engS.state=""; fetchEng(); render(); return; }
+      if(a==="dismiss"){ engS.msg=""; engS.retry=null; render(); return; }
+      if(a==="close"){ engS.form=""; render(); return; }
+      if(a==="openadd"){ engS.form="add"; engS.msg=""; render(); var x=el("engAddName"); if(x) x.focus(); return; }
+      if(a==="openmonthly"||a==="tomonthly"){
+        engS.form="monthly"; engS.msg="";
+        if(e) engS.fv["m.name"]=e.name;
+        if(!engS.fv["m.from"]) engS.fv["m.from"]=dlvKey(dlvToday());
+        render(); view.scrollTop=0; return;
+      }
+      if(a==="doadd"){
+        var nm=engVal("add.name").trim();
+        if(!nm){ engS.bad=true; engS.msg="Type the engineer’s full name."; render(); return; }
+        engDo("add", { action:"engadd", name:nm, email:engVal("add.email").trim(), folder:engVal("add.folder").trim() }, function(){
+          engS.form=""; engS.fv["add.name"]=""; engS.fv["add.email"]=""; engS.fv["add.folder"]="";
+        });
+        return;
+      }
+      if(a==="domonthly"){
+        var who=engVal("m.name");
+        if(!who){ engS.bad=true; engS.msg="Pick the engineer first."; render(); return; }
+        if(!engVal("m.from")){ engS.bad=true; engS.msg="Pick the date of their first monthly delivery."; render(); return; }
+        engDo("monthly", { action:"engmonthly", name:who, from:engVal("m.from"), lockup:engVal("m.lock").trim() }, function(){
+          engS.form=""; engS.fv["m.name"]=""; engS.fv["m.lock"]="";
+        });
+        return;
+      }
+      if(a==="scan"){ engDo("scan", { action:"engscan" }); return; }
+      if(a==="force" && engS.retry){ engDo("ids", engS.retry); return; }
+      if(!e) return;
+      var i=engS.rows.indexOf(e);
+      if(a==="saveids"){
+        var f={ action:"engids", name:e.name }, any=false;
+        ENG_KINDS.forEach(function(k){ var v=engVal("id|"+i+"|"+k.k).trim(); if(v){ f[k.k]=v; any=true; } });
+        if(!any){ engS.bad=true; engS.msg="Type or pick at least one item id for "+e.name+"."; render(); return; }
+        engDo("ids", f, function(){ ENG_KINDS.forEach(function(k){ delete engS.fv["id|"+i+"|"+k.k]; }); });
+        return;
+      }
+      if(a==="setfrom"){ engDo("edit", { action:"engedit", name:e.name, from:engVal("from|"+i) || e.monthlyFrom }, function(){ delete engS.fv["from|"+i]; }); return; }
+      if(a==="back"){ engDo("edit", { action:"engedit", name:e.name, active:"yes" }); return; }
+      if(a==="left"||a==="undo"){
+        if(engS.sure!==a+"|"+i){ engS.sure=a+"|"+i; render(); return; }
+        engDo("edit", a==="left" ? { action:"engedit", name:e.name, active:"no" } : { action:"engedit", name:e.name, weekly:"1" });
+      }
+    };
+  }
+  // retype the folder name preview without losing the cursor
+  var engRedrawT=null;
+  function engSoftRedraw(){ clearTimeout(engRedrawT); engRedrawT=setTimeout(render, 350); }
+
   function loop(){
     if(timer) clearInterval(timer);
     if(!cfg.url && !cfg.errUrl && !cfg.stockUrl && !cfg.flowUrl && !cfg.sortlyUrl && !cfg.qtyUrl && !cfg.apiUrl) return;
@@ -8205,6 +8529,7 @@
   el("tabLevels").onclick=function(){ showTab("levels"); };
   el("tabVans").onclick=function(){ showTab("vans"); };
   el("tabDeliveries").onclick=function(){ showTab("deliveries"); if(!dlv.state || dlv.state==="error" || dlv.state==="timeout") fetchDlv(); };
+  el("tabEngineers").onclick=function(){ showTab("engineers"); if(!engS.state || engS.state==="error") fetchEng(); };
   el("tabErrors").onclick=function(){ showTab("errors"); };
   el("tabOtherInfo").onclick=function(){ showTab("otherinfo"); };
   el("tabCheck").onclick=function(){ showTab("check"); if(!chk.at && !chk.running) runCheck(); };
